@@ -585,6 +585,9 @@ def main(stdscr):
     menu_wireless.agregar_opcion("3. Explorador de Capturas (Visor TUI y Ranger)", AccionMenuDinamico("Explorador WiFi", generar_menu_carpetas_wifi))
 
 
+
+
+
     menu_explotacion = Menu("EXPLOTACIÓN Y POST-EXPLOTACIÓN") 
     menu_explotacion.agregar_opcion("Iniciar Metasploit Framework", AccionBash("MSFConsole", "msfconsole -q -x 'help'"))
     menu_explotacion.agregar_opcion("Buscar Exploits (SearchSploit)", AccionBash("SearchSploit", "searchsploit linux privilege escalation"))
