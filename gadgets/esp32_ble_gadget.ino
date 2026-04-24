@@ -1,6 +1,9 @@
 #include <SPI.h>
 #include <RF24.h>
 #include <BTLE.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ======================================================================
 // CONFIGURACIÓN DE PINES (ESP32)
@@ -19,6 +22,14 @@ const int VSPI_MOSI = 23;
 const int VSPI_SS   = 21;
 const int VSPI_CE   = 22;
 
+// OLED I2C (pines configurables)
+#define OLED_SDA 21
+#define OLED_SCL 22
+#define OLED_ADDR 0x3C
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1   // Reset por software
+
 // ======================================================================
 // OBJETOS DE RADIO Y BTLE
 // ======================================================================
@@ -30,6 +41,12 @@ RF24 radio1(VSPI_CE, VSPI_SS);
 
 BTLE btle0(&radio0);
 BTLE btle1(&radio1);
+
+// ======================================================================
+// PANTALLA OLED
+// ======================================================================
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+bool displayOK = false;
 
 // ======================================================================
 // ESTADOS DE LOS MÓDULOS
@@ -61,6 +78,12 @@ Module mod[2] = {
   {IDLE, false, 0, 0, 0, "", 0, 0, 0, 0, 0}
 };
 
+// Variables para la pantalla
+String lastCommand = "";
+unsigned long lastDisplayUpdate = 0;
+const unsigned long DISPLAY_UPDATE_INTERVAL = 200; // ms
+int scanDeviceCount[2] = {0, 0};   // dispositivos encontrados en el escaneo actual
+
 // Watchdog simple
 unsigned long lastWatchdogReset = 0;
 const unsigned long WATCHDOG_INTERVAL = 5000; // 5 seg
@@ -77,6 +100,7 @@ void doFlood(int mod, BTLE &btle);
 void doJam(int mod, RF24 &radio);
 void stopModule(int mod, BTLE &btle, RF24 &radio);
 void resetWatchdog();
+void updateDisplay();
 
 // ======================================================================
 // SETUP
@@ -84,6 +108,24 @@ void resetWatchdog();
 void setup() {
   Serial.begin(115200);
   Serial.println("DRAGON FLY GADGET READY");
+
+  // Inicializar I2C y pantalla OLED
+  Wire.begin(OLED_SDA, OLED_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    Serial.println("OLED no detectado. Continuando sin pantalla.");
+    displayOK = false;
+  } else {
+    displayOK = true;
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("DRAGON FLY");
+    display.println("GADGET READY");
+    display.display();
+    delay(2000);
+    display.clearDisplay();
+  }
 
   // Inicializar HSPI y VSPI
   initRadio(radio0, hspi, HSPI_SCK, HSPI_MISO, HSPI_MOSI);
@@ -128,9 +170,14 @@ void loop() {
   handleModule(0, btle0, radio0);
   handleModule(1, btle1, radio1);
 
+  // Actualización periódica de la pantalla OLED (cada 200 ms)
+  if (displayOK && (millis() - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL)) {
+    updateDisplay();
+    lastDisplayUpdate = millis();
+  }
+
   // Watchdog: reiniciar si la comunicación serie se congela (muy simple)
   if (millis() - lastWatchdogReset > WATCHDOG_INTERVAL) {
-    // Podríamos reiniciar aquí, pero solo reiniciamos el contador
     resetWatchdog();
   }
 }
@@ -139,18 +186,26 @@ void loop() {
 // PROCESADOR DE COMANDOS
 // ======================================================================
 void processCommand(String cmd) {
+  // Guardar el último comando recibido (para la pantalla)
+  lastCommand = cmd;
+  // Truncar a 20 caracteres para que quepa en la pantalla
+  if (lastCommand.length() > 20) lastCommand = lastCommand.substring(0, 20) + "...";
+
   cmd.toUpperCase();
   if (cmd.startsWith("SCAN")) {
     int mod = cmd.substring(5).toInt();
     int dur = cmd.substring(cmd.lastIndexOf(' ') + 1).toInt();
     if (mod >= 0 && mod <= 1 && dur > 0) {
       if (mod[mod].state == IDLE) {
+        // Reiniciar contador de dispositivos para este módulo
+        scanDeviceCount[mod] = 0;
         mod[mod].state = SCANNING;
         mod[mod].startTime = millis();
         mod[mod].scanDuration = dur * 1000UL;
         mod[mod].stopRequested = false;
         // Configurar escaneo en BTLE
-        btle0.setChannel(37); // Escaneará los tres canales automáticamente
+        if (mod == 0) btle0.setChannel(37);
+        else btle1.setChannel(37);
         Serial.println("SCANNING_STARTED");
       } else {
         Serial.println("ERROR:MODULE_BUSY");
@@ -291,6 +346,9 @@ void doScan(int mod, BTLE &btle) {
     Serial.print(rssi);
     Serial.print(",");
     Serial.println(name);
+    
+    // Incrementar contador de dispositivos para la pantalla
+    scanDeviceCount[mod]++;
     btle.stopScan(); // Necesario para el siguiente paquete
   }
   // Finalizar si se excede el tiempo
@@ -302,11 +360,9 @@ void doScan(int mod, BTLE &btle) {
 }
 
 void doAdvertise(int mod, BTLE &btle) {
-  // Publicidad continua con el mensaje como nombre de dispositivo
   const char* msg = mod[mod].advertiseMsg.c_str();
   btle.advertise((void*)msg, strlen(msg), ADV_NONCONN_IND);
-  delay(100); // Pequeña pausa para permitir otras tareas
-  // La publicidad se detiene al recibir STOP
+  delay(100);
 }
 
 void doFlood(int mod, BTLE &btle) {
@@ -318,7 +374,6 @@ void doFlood(int mod, BTLE &btle) {
   }
   unsigned long now = millis();
   if (now - mod[mod].lastBeaconTime >= mod[mod].floodInterval) {
-    // Generar nombre aleatorio
     const char* ssids[] = {"FreeWiFi","Starbucks","AirportWifi","Corporate","Guest","HomeNetwork","PublicWiFi","Office"};
     int idx = random(0, 8);
     String randomName = String(ssids[idx]) + String(random(100, 999));
@@ -333,16 +388,14 @@ void doJam(int mod, RF24 &radio) {
   if (millis() >= mod[mod].jamEndTime) {
     radio.stopConstCarrier();
     radio.powerDown();
-    radio.powerUp(); // Volver a estado normal
+    radio.powerUp();
     Serial.println("JAM_DONE");
     mod[mod].state = IDLE;
     return;
   }
   // Asegurar portadora activa
-  if (!radio.isPVariant()) { // no es buena comprobación, mejor usar flag
-    radio.setChannel(mod[mod].jamChannel);
-    radio.startConstCarrier();
-  }
+  radio.setChannel(mod[mod].jamChannel);
+  radio.startConstCarrier();
 }
 
 void stopModule(int mod, BTLE &btle, RF24 &radio) {
@@ -357,4 +410,54 @@ void stopModule(int mod, BTLE &btle, RF24 &radio) {
   }
   mod[mod].state = IDLE;
   Serial.println("STOPPED");
+}
+
+// ======================================================================
+// ACTUALIZACIÓN DE LA PANTALLA OLED
+// ======================================================================
+String getStateString(ModuleState s) {
+  switch(s) {
+    case IDLE:        return "IDLE";
+    case SCANNING:    return "SCAN";
+    case ADVERTISING: return "ADV";
+    case FLOODING:    return "FLOOD";
+    case JAMMING:     return "JAM";
+    default:          return "UNK";
+  }
+}
+
+void updateDisplay() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Línea 0: título
+  display.println("DRAGON FLY GADGET");
+  
+  // Línea 1: Módulo 0
+  display.print("M0:");
+  display.print(getStateString(mod[0].state));
+  if (mod[0].state == SCANNING) {
+    display.print("(");
+    display.print(scanDeviceCount[0]);
+    display.print(")");
+  }
+  display.println();
+  
+  // Línea 2: Módulo 1
+  display.print("M1:");
+  display.print(getStateString(mod[1].state));
+  if (mod[1].state == SCANNING) {
+    display.print("(");
+    display.print(scanDeviceCount[1]);
+    display.print(")");
+  }
+  display.println();
+  
+  // Línea 3: último comando
+  display.print("CMD:");
+  display.println(lastCommand);
+  
+  display.display();
 }
