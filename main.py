@@ -9,6 +9,7 @@ import tempfile
 from datetime import datetime
 import glob
 import ducky_logic
+from gadget_handler import BLEGadget
 
 # ==========================================
 # CONFIGURACION VISUAL PRO (Red Team Theme)
@@ -81,6 +82,23 @@ class RedTeamApp(ctk.CTk):
         # Crear directorios base
         for d in [BASE_DIR_NMAP, BASE_DIR_WIFI, BASE_DIR_EVIL, BASE_DIR_BLE]:
             os.makedirs(d, exist_ok=True)
+
+        # ==========================================
+        # INICIALIZACIÓN DEL GADGET BLE 
+        # ==========================================
+        try:
+            self.gadget = BLEGadget()
+            if self.gadget.is_available():
+                self.gadget_available = True
+                print("[+] Gadget ESP32 BLE conectado correctamente.")
+            else:
+                self.gadget_available = False
+                print("[!] Gadget ESP32 BLE no detectado.")
+        except Exception as e:
+            self.gadget = None
+            self.gadget_available = False
+            print(f"[!] Error al inicializar gadget BLE: {e}")
+
 
         # Sidebar
         self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=15, fg_color=COLOR_FONDO_SIDEBAR)
@@ -1159,104 +1177,172 @@ no-resolv
             btn.pack(fill="x", pady=3)
         self.mostrar_consola()
 
+ 
     # ==========================================
-    # MENÚ BLUETOOTH BLE
+    # MENÚ BLUETOOTH
     # ==========================================
     def show_bluetooth_menu(self):
         self.limpiar_main_frame()
-        ctk.CTkLabel(self.main_frame, text="AUDITORÍA BLUETOOTH BLE", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(10,15))
-        ctk.CTkButton(self.main_frame, text="Escanear Dispositivos BLE", fg_color=COLOR_BOTON_ROJO, 
-                     hover_color=COLOR_BOTON_HOVER, height=40, command=self._ble_escanear).pack(fill="x", padx=40, pady=8)
-        ctk.CTkButton(self.main_frame, text="Explorar Resultados BLE", fg_color="#4a4a4a", 
-                     hover_color="#2b2b2b", height=40, command=lambda: self._mostrar_explorador_generico(BASE_DIR_BLE, "RESULTADOS BLE", self.show_bluetooth_menu)).pack(fill="x", padx=40, pady=8)
+        ctk.CTkLabel(self.main_frame, text="AUDITORÍA BLUETOOTH BLE",
+                     font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(10,15))
+
+        # Indicador de estado del gadget
+        gadget_status = "Conectado" if self.gadget_available else "Desconectado"
+        ctk.CTkLabel(self.main_frame, text=f"Gadget ESP32: {gadget_status}",
+                     text_color="#00ff00" if self.gadget_available else "#ff4d4d",
+                     font=ctk.CTkFont(size=12)).pack(pady=(0,10))
+
+        if self.gadget_available:
+            # --- OPCIONES CON GADGET ---
+            btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+            btn_frame.pack(fill="x", padx=20, pady=5)
+
+            ctk.CTkButton(btn_frame, text="Escanear BLE (HSPI)", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=lambda: self._ble_scan_gadget(0)).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Escanear BLE (VSPI)", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=lambda: self._ble_scan_gadget(1)).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Bluejacking (Enviar mensaje)", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=self._bluejacking_gui).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Beacon Flooding (Saturación)", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=self._beacon_flood_gui).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Jammer Bluetooth", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=self._jammer_gui).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Detener todo (Gadget)", fg_color=COLOR_BOTON_PELIGRO,
+                          hover_color="#cc7a00", height=40,
+                          command=self._gadget_stop_all).pack(fill="x", pady=5)
+            ctk.CTkButton(btn_frame, text="Estado del Gadget", fg_color="#4a4a4a",
+                          hover_color="#2b2b2b", height=40,
+                          command=self._gadget_status).pack(fill="x", pady=5)
+        else:
+            # --- MODO LEGACY (bluetoothctl) ---
+            ctk.CTkButton(self.main_frame, text="Escanear Dispositivos BLE", fg_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, height=40,
+                          command=self._ble_escanear).pack(fill="x", padx=40, pady=8)
+
+        # Opción común para ambos modos
+        ctk.CTkButton(self.main_frame, text="Explorar Resultados BLE", fg_color="#4a4a4a",
+                      hover_color="#2b2b2b", height=40,
+                      command=lambda: self._mostrar_explorador_generico(BASE_DIR_BLE, "RESULTADOS BLE", self.show_bluetooth_menu)
+                      ).pack(fill="x", padx=40, pady=8)
+
         self.mostrar_consola()
 
-    def _ble_escanear(self):
+    # ==========================================
+    # NUEVOS MÉTODOS DE ATAQUE CON GADGET
+    # ==========================================
+    def _ble_scan_gadget(self, module):
+        """Escanea BLE usando el módulo indicado del gadget."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_bluetooth_menu)
-        ctk.CTkLabel(self.main_frame, text="ESCANEANDO BLE (10 segundos)...", font=ctk.CTkFont(size=16)).pack(pady=10)
+        ctk.CTkLabel(self.main_frame, text=f"ESCANEANDO BLE (MÓDULO {module})...",
+                     font=ctk.CTkFont(size=16)).pack(pady=10)
         self.mostrar_consola()
-        self.escribir_consola("[*] Iniciando escaneo BLE...")
-        # Inicializar Bluetooth
-        os.system("sudo systemctl start bluetooth 2>/dev/null")
-        os.system("sudo rfkill unblock bluetooth 2>/dev/null")
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        session_dir = os.path.join(BASE_DIR_BLE, f"Auditoria-{timestamp}")
-        os.makedirs(session_dir, exist_ok=True)
-        scan_file = f"{session_dir}/raw_scan.log"
-        
-        def escanear():
-            os.system(f"sudo timeout 10s bluetoothctl scan on > '{scan_file}' 2>&1")
-            dispositivos = []
-            try:
-                with open(scan_file, "r", errors="ignore") as f:
-                    for linea in f:
-                        if "Device" in linea:
-                            partes = linea.strip().split()
-                            if len(partes) >= 3:
-                                mac = partes[1]
-                                nombre = " ".join(partes[2:])
-                                dispositivos.append({"mac": mac, "nombre": nombre})
-            except Exception as e:
-                self.escribir_consola(f"[!] Error: {e}")
-            self.after(0, lambda: self._ble_mostrar_dispositivos(dispositivos))
-        threading.Thread(target=escanear, daemon=True).start()
+        self.escribir_consola(f"[*] Iniciando escaneo con módulo {module} (duración 10s)...")
 
-    def _ble_mostrar_dispositivos(self, dispositivos):
+        def callback(devices):
+            self.after(0, lambda: self._ble_gadget_mostrar_dispositivos(devices, module))
+        self.gadget.scan(module, 10, callback)
+
+    def _ble_gadget_mostrar_dispositivos(self, dispositivos, module):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_bluetooth_menu)
-        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS BLE ENCONTRADOS", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS ENCONTRADOS (Gadget)",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
         if not dispositivos:
             ctk.CTkLabel(self.main_frame, text="No se encontraron dispositivos.").pack()
             return
         frame = ctk.CTkScrollableFrame(self.main_frame, height=300)
         frame.pack(fill="both", expand=True, padx=20, pady=10)
         for dev in dispositivos:
-            texto = f"{dev['nombre']} ({dev['mac']})"
-            btn = ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER,
-                               command=lambda d=dev: self._ble_acciones(d))
+            texto = f"{dev['name'][:30]}  ({dev['mac']})  RSSI:{dev['rssi']}"
+            btn = ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b",
+                                hover_color=COLOR_BOTON_HOVER,
+                                command=lambda d=dev: self._ble_acciones(d))
             btn.pack(fill="x", pady=3)
         self.mostrar_consola()
 
-    def _ble_acciones(self, dispositivo):
-        self.ble_state["target"] = dispositivo
+    def _bluejacking_gui(self):
+        """Interfaz para enviar un mensaje de publicidad BLE (bluejacking)."""
+        dialog = ctk.CTkInputDialog(text="Mensaje a enviar en advertising:", title="Bluejacking")
+        msg = dialog.get_input()
+        if msg:
+            # Usar módulo 0 por defecto
+            self.escribir_consola(f"[*] Enviando publicidad: {msg}")
+            self.gadget.advertise(0, msg)
+            # Botón para detener (agregar a la interfaz actual)
+            self.limpiar_main_frame()
+            self.agregar_boton_atras(self.show_bluetooth_menu)
+            ctk.CTkLabel(self.main_frame, text="Publicidad activa. Mensaje: " + msg,
+                         font=ctk.CTkFont(size=14)).pack(pady=20)
+            ctk.CTkButton(self.main_frame, text="Detener Publicidad", fg_color=COLOR_BOTON_PELIGRO,
+                          command=lambda: self.gadget.stop(0)).pack(pady=10)
+            self.mostrar_consola()
+
+    def _beacon_flood_gui(self):
+        """Configura y lanza un ataque de beacon flooding."""
+        dialog_count = ctk.CTkInputDialog(text="Cantidad de beacons:", title="Beacon Flood")
+        count_str = dialog_count.get_input()
+        if not count_str:
+            count = 50
+        else:
+            count = int(count_str)
+        dialog_interval = ctk.CTkInputDialog(text="Intervalo (ms):", title="Beacon Flood")
+        interval_str = dialog_interval.get_input()
+        if not interval_str:
+            interval = 200
+        else:
+            interval = int(interval_str)
+
+        self.escribir_consola(f"[*] Iniciando beacon flood: {count} beacons cada {interval}ms")
+        self.gadget.beacon_flood(0, count, interval)
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_bluetooth_menu)
-        ctk.CTkLabel(self.main_frame, text=f"ACCIONES BLE: {dispositivo['nombre'][:20]}", 
-                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
-        opciones = [
-            ("Explorar Servicios GATT", self._ble_explorar_gatt),
-            ("Clonar/Modificar MAC", self._ble_spoof_mac),
-            ("Fuerza Bruta PIN", self._ble_bruteforce),
-            ("Guardar Información", self._ble_guardar_info),
-        ]
-        for texto, cmd in opciones:
-            ctk.CTkButton(self.main_frame, text=texto, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER,
-                         command=cmd).pack(fill="x", padx=40, pady=5)
+        ctk.CTkLabel(self.main_frame, text=f"Flood en curso: {count} beacons.", font=ctk.CTkFont(size=14)).pack(pady=20)
+        ctk.CTkButton(self.main_frame, text="Detener Flood", fg_color=COLOR_BOTON_PELIGRO,
+                      command=lambda: self.gadget.stop(0)).pack(pady=10)
         self.mostrar_consola()
 
-    def _ble_explorar_gatt(self):
-        mac = self.ble_state["target"]["mac"]
-        self.ejecutar_comando(f"bluetoothctl connect {mac} && bluetoothctl info {mac} && bluetoothctl disconnect {mac}")
+    def _jammer_gui(self):
+        """Activa jammer en un canal BLE específico."""
+        dialog_ch = ctk.CTkInputDialog(text="Canal (0-78):", title="Jammer BLE")
+        ch_str = dialog_ch.get_input()
+        if not ch_str:
+            return
+        channel = int(ch_str)
+        dialog_dur = ctk.CTkInputDialog(text="Duración (segundos):", title="Jammer BLE")
+        dur_str = dialog_dur.get_input()
+        if not dur_str:
+            return
+        duration = int(dur_str)
 
-    def _ble_spoof_mac(self):
-        # Simplificado: muestra mensaje
-        self.escribir_consola("[!] Para cambiar MAC BLE usa 'sudo btmgmt addr <MAC>' manualmente.")
+        self.escribir_consola(f"[*] Iniciando jamming en canal {channel} por {duration}s")
+        self.gadget.jam(0, channel, duration)
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text=f"Jamming en canal {channel}...", font=ctk.CTkFont(size=14)).pack(pady=20)
+        ctk.CTkButton(self.main_frame, text="Detener Jammer", fg_color=COLOR_BOTON_PELIGRO,
+                      command=lambda: self.gadget.stop(0)).pack(pady=10)
+        self.mostrar_consola()
 
-    def _ble_bruteforce(self):
-        mac = self.ble_state["target"]["mac"]
-        self.escribir_consola(f"[!] Iniciando prueba de fuerza bruta contra {mac} (PINs 0000-9999 simulado)")
-        # Simulación
-        self.ejecutar_comando(f"echo 'Probando PINs... (simulación)'")
+    def _gadget_stop_all(self):
+        """Detiene cualquier operación en ambos módulos del gadget."""
+        self.escribir_consola("[*] Deteniendo módulos del gadget...")
+        self.gadget.stop(0)
+        self.gadget.stop(1)
 
-    def _ble_guardar_info(self):
-        dev = self.ble_state["target"]
-        session_dir = os.path.join(BASE_DIR_BLE, f"Info-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
-        os.makedirs(session_dir, exist_ok=True)
-        archivo = os.path.join(session_dir, f"target_{dev['mac'].replace(':','_')}.txt")
-        with open(archivo, "w") as f:
-            f.write(f"Dispositivo BLE\nMAC: {dev['mac']}\nNombre: {dev['nombre']}\nFecha: {datetime.now()}\n")
-        self.escribir_consola(f"[+] Información guardada en {archivo}")
+    def _gadget_status(self):
+        """Muestra el estado de los módulos del gadget."""
+        if self.gadget_available:
+            status = self.gadget.status()
+            self.escribir_consola(f"[+] Estado gadget: {status}")
+        else:
+            self.escribir_consola("[!] Gadget no disponible.")
+
 
     # ==========================================
     # MENÚ RUBBER DUCKY
