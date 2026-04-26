@@ -1212,6 +1212,12 @@ no-resolv
             ctk.CTkButton(btn_frame, text="Jammer Bluetooth", fg_color=COLOR_BOTON_ROJO,
                           hover_color=COLOR_BOTON_HOVER, height=40,
                           command=self._jammer_gui).pack(fill="x", pady=5)
+
+            # En show_bluetooth_menu, dentro del if self.gadget_available:
+            ctk.CTkButton(btn_frame, text="Barrido Jammer (Frequency Hopping)", fg_color=COLOR_BOTON_ROJO,
+                        hover_color=COLOR_BOTON_HOVER, height=40,
+                        command=self._sweep_jammer_gui).pack(fill="x", pady=5)
+
             ctk.CTkButton(btn_frame, text="Detener todo (Gadget)", fg_color=COLOR_BOTON_PELIGRO,
                           hover_color="#cc7a00", height=40,
                           command=self._gadget_stop_all).pack(fill="x", pady=5)
@@ -1329,6 +1335,27 @@ no-resolv
                       command=lambda: self.gadget.stop(0)).pack(pady=10)
         self.mostrar_consola()
 
+
+    def _sweep_jammer_gui(self):
+        """Configura y lanza el jammer de barrido de frecuencia."""
+        dialog_dur = ctk.CTkInputDialog(text="Duración del barrido (segundos):", title="Barrido Jammer")
+        dur_str = dialog_dur.get_input()
+        if not dur_str:
+            return
+        duration = int(dur_str)
+
+        self.escribir_consola(f"[*] Iniciando barrido jammer durante {duration}s...")
+        self.gadget.sweep_jam(0, duration)
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text=f"Barrido Jammer activo. Duración: {duration}s",
+                    font=ctk.CTkFont(size=14)).pack(pady=20)
+        ctk.CTkButton(self.main_frame, text="Detener Barrido", fg_color=COLOR_BOTON_PELIGRO,
+                    command=lambda: self.gadget.stop(0)).pack(pady=10)
+        self.mostrar_consola()
+
+
+
     def _gadget_stop_all(self):
         """Detiene cualquier operación en ambos módulos del gadget."""
         self.escribir_consola("[*] Deteniendo módulos del gadget...")
@@ -1343,6 +1370,75 @@ no-resolv
         else:
             self.escribir_consola("[!] Gadget no disponible.")
 
+
+    # ==========================================
+    # MÉTODOS LEGACY PARA BLUETOOTH (sin gadget)
+    # ==========================================
+    def _ble_escanear(self):
+        """Escanea dispositivos BLE usando bluetoothctl (modo legacy sin gadget)"""
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="ESCANEANDO DISPOSITIVOS BLE...",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=20)
+        self.mostrar_consola()
+        self.escribir_consola("[*] Iniciando escaneo con bluetoothctl durante 12 segundos...")
+
+        def escanear():
+            # Asegurar que el adaptador esté encendido
+            os.system("sudo hciconfig hci0 up 2>/dev/null")
+            os.system("sudo bluetoothctl power on 2>/dev/null")
+            # Iniciar escaneo
+            os.system("sudo bluetoothctl scan on &")
+            time.sleep(12)
+            os.system("sudo bluetoothctl scan off 2>/dev/null")
+            # Obtener lista de dispositivos
+            dispositivos = []
+            try:
+                output = subprocess.check_output("sudo bluetoothctl devices", shell=True, text=True)
+                for line in output.splitlines():
+                    if "Device" in line:
+                        parts = line.strip().split(' ', 2)
+                        if len(parts) >= 3:
+                            mac = parts[1]
+                            nombre = parts[2]
+                            dispositivos.append({"mac": mac, "nombre": nombre})
+            except Exception as e:
+                self.escribir_consola(f"[!] Error: {e}")
+            self.after(0, lambda: self._mostrar_dispositivos_ble(dispositivos))
+        threading.Thread(target=escanear, daemon=True).start()
+
+
+    def _mostrar_dispositivos_ble(self, dispositivos):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS BLE ENCONTRADOS",
+                     font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
+        if not dispositivos:
+            ctk.CTkLabel(self.main_frame, text="No se encontraron dispositivos.").pack()
+            return
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=300)
+        frame.pack(fill="both", expand=True, padx=20, pady=10)
+        for dev in dispositivos:
+            texto = f"{dev['nombre']}  ({dev['mac']})"
+            btn = ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b",
+                                hover_color=COLOR_BOTON_HOVER,
+                                command=lambda d=dev: self._ble_conectar_legacy(d['mac']))
+            btn.pack(fill="x", pady=3)
+        self.mostrar_consola()
+
+    
+
+    def _ble_conectar_legacy(self, mac):
+        """Intenta emparejar y conectar a un dispositivo BLE usando bluetoothctl"""
+        self.escribir_consola(f"[*] Conectando a {mac}...")
+        def conectar():
+            try:
+                subprocess.run(f"sudo bluetoothctl pair {mac}", shell=True, timeout=30)
+                subprocess.run(f"sudo bluetoothctl connect {mac}", shell=True, timeout=30)
+                self.escribir_consola(f"[+] Conectado a {mac}")
+            except Exception as e:
+                self.escribir_consola(f"[!] Error: {e}")
+        threading.Thread(target=conectar, daemon=True).start()
 
     # ==========================================
     # MENÚ RUBBER DUCKY
