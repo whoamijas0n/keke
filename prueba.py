@@ -1,5 +1,4 @@
-[file name]: main.py
-[file content begin]
+
 import customtkinter as ctk
 import subprocess
 import threading
