@@ -1802,4 +1802,4 @@ no-resolv
 if __name__ == "__main__":
     app = RedTeamApp()
     app.mainloop()
-[file content end]
+
