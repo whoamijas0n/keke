@@ -276,13 +276,16 @@ class RedTeamApp(tk.Tk):
                                    width=8, command=callback)
         self.back_btn.pack(anchor="nw", padx=2, pady=2)
 
-    def mostrar_consola(self):
-        """Consola de solo lectura SIN expandir (tamaño fijo 4 líneas)."""
-        self.console_textbox = tk.Text(self.main_frame, height=4, bg='#0a0a0a',
+    def mostrar_consola(self, parent=None):
+        """Consola dinámica que se ajusta al contenedor provisto (normalmente el frame scrolleable)."""
+        if parent is None:
+            parent = self.main_frame
+            
+        self.console_textbox = tk.Text(parent, height=4, bg='#0a0a0a',
                                        fg=COLOR_TEXTO_TERMINAL, font=('Courier', 9),
                                        state='disabled', highlightthickness=0,
                                        borderwidth=0, relief='flat')
-        # Empaquetado sin expand, solo relleno horizontal
+        # Empaquetado en el contenedor provisto
         self.console_textbox.pack(fill='x', padx=2, pady=2)
 
     def escribir_consola(self, texto):
@@ -367,6 +370,10 @@ class RedTeamApp(tk.Tk):
         ttk.Label(self.main_frame, text="DRAGON FLY SYSTEM", style='Title.TLabel').pack(pady=(8,2))
         ttk.Label(self.main_frame, text="Red Team Toolbox", style='Gray.TLabel').pack(pady=(0,6))
 
+        # Envolvemos el menú principal en un ScrollableFrame
+        scroll_menu = ScrollableFrame(self.main_frame, max_items=10)
+        scroll_menu.pack(fill='both', expand=True, padx=2, pady=2)
+
         opciones = [
             ("1. Reconocimiento", self.show_recon_menu),
             ("2. MAC Changer", self.show_mac_menu),
@@ -376,11 +383,10 @@ class RedTeamApp(tk.Tk):
             ("6. Utilidades OS", self.show_utils_menu)
         ]
         for texto, comando in opciones:
-            ttk.Button(self.main_frame, text=texto, style='Red.TButton',
-                       command=comando, width=30).pack(fill='x', padx=8, pady=2)
+            scroll_menu.add_button(text=texto, command=comando, style='Red.TButton', width=30)
 
     # ==========================================
-    # MENÚ RECONOCIMIENTO (NMAP) - AHORA VISIBLE COMPLETO
+    # MENÚ RECONOCIMIENTO (NMAP) 
     # ==========================================
     def show_recon_menu(self):
         self.session_dir_nmap = ""
@@ -388,16 +394,17 @@ class RedTeamApp(tk.Tk):
         self.agregar_boton_atras(self.show_inicio_menu)
         ttk.Label(self.main_frame, text="RECONOCIMIENTO (NMAP)", style='Title.TLabel').pack(pady=(2,1))
 
-        # Configuración de target
-        config_frame = ttk.Frame(self.main_frame, style='Dark.TFrame')
+        # Todo el contenido de Reconocimiento irá en este único ScrollableFrame
+        scroll_cmds = ScrollableFrame(self.main_frame, max_items=20)
+        scroll_cmds.pack(fill='both', expand=True, padx=2, pady=2)
+
+        # Configuración de target dentro del scrollable frame
+        config_frame = ttk.Frame(scroll_cmds.scrollable_frame, style='Dark.TFrame')
         config_frame.pack(fill='x', padx=2, pady=1)
 
         ttk.Label(config_frame, text="IP:", style='Dark.TLabel').grid(row=0, column=0, padx=1, pady=1)
-
-        # --- Asegúrate de tener estas dos líneas ---
         entry_target = ttk.Entry(config_frame, textvariable=self.target_ip, width=16, style='Dark.TEntry')
         entry_target.grid(row=0, column=1, padx=1, pady=1)
-        # --------------------------------------------
 
         ttk.Button(config_frame, text="Set", style='Red.TButton', width=6,
                    command=lambda: self.escribir_consola(f"[+] Target: {self.obtener_target() or 'Inválido'}")).grid(row=0, column=2, padx=1, pady=1)
@@ -405,27 +412,10 @@ class RedTeamApp(tk.Tk):
         chk_rango = ttk.Checkbutton(config_frame, text="Usar rango", variable=self.usar_rango, style='Dark.TCheckbutton')
         chk_rango.grid(row=1, column=0, columnspan=2, sticky="w", padx=1, pady=1)
 
-        # --- Cambiado a Dark.TMenubutton ---
         rango_menu = ttk.OptionMenu(config_frame, self.rango_cidr, self.rango_cidr.get(), "/24", "/16", "/8", style='Dark.TMenubutton')
         rango_menu.grid(row=1, column=2, padx=1, pady=1)
 
-        # Lista de comandos Nmap
-        comandos_nmap = [
-            ("0. Descubrimiento", "-sn {TARGET} -oN {SESSION}/00_hosts.txt"),
-            # ... (usa la lista completa de 13 comandos que ya tienes)
-        ]
-        scroll_cmds = ScrollableFrame(self.main_frame, max_items=15)
-        scroll_cmds.pack(fill='both', expand=True, padx=2, pady=2)
-        for nombre, cmd in comandos_nmap:
-            scroll_cmds.add_button(text=nombre, command=lambda c=cmd: self._ejecutar_nmap(c),
-                                   style='Red.TButton', width=28)
-
-        ttk.Button(self.main_frame, text="Ver Resultados", style='Gray.TButton',
-                   command=self._mostrar_explorador_nmap).pack(pady=3, fill='x', padx=20)
-        self.mostrar_consola()
-        gc.collect()
-
-        # Lista completa de comandos Nmap (13 opciones)
+        # Lista única y completa de comandos Nmap (se eliminó la duplicidad)
         comandos_nmap = [
             ("0. Descubrimiento", "-sn {TARGET} -oN {SESSION}/00_hosts.txt"),
             ("1. Puertos comunes", "-sS -T3 --top-ports 1000 {TARGET} -oN {SESSION}/01_common.txt"),
@@ -442,22 +432,15 @@ class RedTeamApp(tk.Tk):
             ("12. Automatizado", f"-sn {{TARGET}} -oN {{SESSION}}/12a_discovery.txt && nmap -sS -p- -T3 {{TARGET}} -oN {{SESSION}}/12b_ports.txt && nmap -sV -sC {{TARGET}} -oN {{SESSION}}/12c_services.txt")
         ]
 
-        # Scroll vertical para los comandos (ocupa el espacio que sobra)
-        scroll_cmds = ScrollableFrame(self.main_frame, max_items=15)
-        scroll_cmds.pack(fill='both', expand=True, padx=2, pady=2)
-
         for nombre, cmd in comandos_nmap:
-            scroll_cmds.add_button(text=nombre,
-                                   command=lambda c=cmd: self._ejecutar_nmap(c),
-                                   style='Red.TButton',
-                                   width=28)
+            scroll_cmds.add_button(text=nombre, command=lambda c=cmd: self._ejecutar_nmap(c),
+                                   style='Red.TButton', width=28)
 
-        # Botón explorar
-        ttk.Button(self.main_frame, text="Ver Resultados", style='Gray.TButton',
+        # Botón explorar y consola inyectados al final del frame deslizable
+        ttk.Button(scroll_cmds.scrollable_frame, text="Ver Resultados", style='Gray.TButton',
                    command=self._mostrar_explorador_nmap).pack(pady=3, fill='x', padx=20)
-
-        # Consola al final (sin expand)
-        self.mostrar_consola()
+        
+        self.mostrar_consola(parent=scroll_cmds.scrollable_frame)
         gc.collect()
 
     def _ejecutar_nmap(self, cmd_template):
@@ -490,7 +473,7 @@ class RedTeamApp(tk.Tk):
             ruta = os.path.join(BASE_DIR_NMAP, carpeta)
             scroll.add_button(text=carpeta, command=lambda r=ruta: self._mostrar_archivos_nmap(r),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _mostrar_archivos_nmap(self, ruta):
@@ -511,47 +494,57 @@ class RedTeamApp(tk.Tk):
             scroll.add_button(text=archivo,
                               command=lambda ap=arch_path: self.ejecutar_comando(f"cat '{ap}'"),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     # ==========================================
-    # MENÚ MAC CHANGER (AHORA VISIBLE COMPLETO)
+    # MENÚ MAC CHANGER 
     # ==========================================
     def show_mac_menu(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_inicio_menu)
         ttk.Label(self.main_frame, text="DIRECCION MAC", style='Title.TLabel').pack(pady=2)
+        
         interfaces = self.obtener_interfaces_red()
         if not interfaces:
             ttk.Label(self.main_frame, text="No hay interfaces.", style='Dark.TLabel').pack()
             return
+            
+        scroll_mac = ScrollableFrame(self.main_frame, max_items=10)
+        scroll_mac.pack(fill='both', expand=True, padx=2, pady=2)
+            
         self.interfaz_seleccionada.set(interfaces[0])
-        sel_frame = ttk.Frame(self.main_frame, style='Dark.TFrame')
+        sel_frame = ttk.Frame(scroll_mac.scrollable_frame, style='Dark.TFrame')
         sel_frame.pack(pady=3)
         ttk.Label(sel_frame, text="Iface: ", style='Dark.TLabel').pack(side='left')
 
         ttk.OptionMenu(sel_frame, self.interfaz_seleccionada, self.interfaz_seleccionada.get(),
                        *interfaces, style='Dark.TMenubutton').pack(side='left')
+                       
         botones = [
             ("Ver Estado", f"sudo macchanger -s {self.interfaz_seleccionada.get()}"),
             ("MAC Random", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -r {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up"),
             ("Reset Original", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -p {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up"),
             ("Mismo Fabricante", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -a {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up")
         ]
+        
         for texto, cmd in botones:
-            ttk.Button(self.main_frame, text=texto, style='Red.TButton',
-                       command=lambda c=cmd: self.ejecutar_comando(c)).pack(fill='x', padx=10, pady=2)
+            scroll_mac.add_button(text=texto, command=lambda c=cmd: self.ejecutar_comando(c),
+                                  style='Red.TButton', width=28)
 
-        # Consola al final (sin expand, solo ancho completo)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll_mac.scrollable_frame)
 
     # ==========================================
-    # MENÚ WIFI (conserva el resto sin cambios, solo se ajustó la consola en todas partes)
+    # MENÚ WIFI 
     # ==========================================
     def show_wifi_menu(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_inicio_menu)
         ttk.Label(self.main_frame, text="AUDITORÍA WIFI", style='Title.TLabel').pack(pady=2)
+        
+        scroll_wifi = ScrollableFrame(self.main_frame, max_items=10)
+        scroll_wifi.pack(fill='both', expand=True, padx=2, pady=2)
+        
         opciones = [
             ("Activar Monitor", self._wifi_modo_monitor),
             ("Captura Handshake", self._wifi_captura_handshake),
@@ -561,18 +554,23 @@ class RedTeamApp(tk.Tk):
             ("Explorar Evil Twin", self._wifi_explorar_evil),
         ]
         for texto, cmd in opciones:
-            ttk.Button(self.main_frame, text=texto, style='Red.TButton',
-                       command=cmd, width=26).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll_wifi.add_button(text=texto, command=cmd, style='Red.TButton', width=28)
+            
+        self.mostrar_consola(parent=scroll_wifi.scrollable_frame)
 
     def _wifi_modo_monitor(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_wifi_menu)
         ttk.Label(self.main_frame, text="MODO MONITOR", style='Title.TLabel').pack(pady=2)
         interfaces = self.obtener_interfaces_red()
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         if not interfaces:
-            ttk.Label(self.main_frame, text="No hay interfaces.", style='Dark.TLabel').pack()
+            ttk.Label(scroll.scrollable_frame, text="No hay interfaces.", style='Dark.TLabel').pack()
             return
+            
         for iface in interfaces:
             def comando_iface(i=iface):
                 subprocess.run(["sudo", "airmon-ng", "check", "kill"],
@@ -581,9 +579,9 @@ class RedTeamApp(tk.Tk):
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.ejecutar_comando(f"sudo airmon-ng start {i}",
                                      callback_after=lambda: self.escribir_consola("[+] Hecho."))
-            ttk.Button(self.main_frame, text=f"Start {iface}", style='Red.TButton',
-                       command=comando_iface).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=f"Start {iface}", command=comando_iface, style='Red.TButton', width=28)
+            
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _generar_nombre_temporal(self, prefijo):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -593,11 +591,16 @@ class RedTeamApp(tk.Tk):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_wifi_menu)
         ttk.Label(self.main_frame, text="CAPTURAR: Elija IFace", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         interfaces = self.obtener_interfaces_red()
         for iface in interfaces:
-            ttk.Button(self.main_frame, text=iface, style='Red.TButton',
-                       command=lambda i=iface: self._wifi_escanear_redes_handshake(i)).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=iface, command=lambda i=iface: self._wifi_escanear_redes_handshake(i), 
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _wifi_escanear_redes_handshake(self, iface):
         self.wifi_state = {"iface": iface, "mon_iface": None}
@@ -643,7 +646,7 @@ class RedTeamApp(tk.Tk):
             texto = f"{red['essid']} (CH:{red['ch']})"
             scroll.add_button(text=texto, style='Gray.TButton', width=28,
                               command=lambda r=red: self._wifi_seleccionar_cliente_handshake(r))
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _wifi_seleccionar_cliente_handshake(self, red):
@@ -676,7 +679,7 @@ class RedTeamApp(tk.Tk):
         for mac in clientes:
             scroll.add_button(text=mac, style='Gray.TButton', width=28,
                               command=lambda m=mac: self._wifi_iniciar_ataque_handshake(m))
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _wifi_iniciar_ataque_handshake(self, cliente_mac):
@@ -694,30 +697,40 @@ class RedTeamApp(tk.Tk):
 
 
     # ==========================================
-    # EVIL TWIN (migrado a listas scrollables)
+    # EVIL TWIN 
     # ==========================================
     def _wifi_evil_twin(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_wifi_menu)
         ttk.Label(self.main_frame, text="EVIL TWIN - IFace AP", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         interfaces = self.obtener_interfaces_red()
         if len(interfaces) < 2:
-            ttk.Label(self.main_frame, text="Requiere 2 interfaces.", style='Dark.TLabel').pack()
+            ttk.Label(scroll.scrollable_frame, text="Requiere 2 interfaces.", style='Dark.TLabel').pack()
             return
         for iface in interfaces:
-            ttk.Button(self.main_frame, text=f"AP: {iface}", style='Red.TButton',
-                       command=lambda i=iface: self._evil_twin_select_deauth(i)).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=f"AP: {iface}", command=lambda i=iface: self._evil_twin_select_deauth(i),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _evil_twin_select_deauth(self, ap_iface):
         self.wifi_state["ap_iface"] = ap_iface
         self.limpiar_main_frame()
         self.agregar_boton_atras(self._wifi_evil_twin)
         ttk.Label(self.main_frame, text="IFace Deauth", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         for iface in [i for i in self.obtener_interfaces_red() if i != ap_iface]:
-            ttk.Button(self.main_frame, text=iface, style='Red.TButton',
-                       command=lambda i=iface: self._evil_twin_escanear_redes(i)).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=iface, command=lambda i=iface: self._evil_twin_escanear_redes(i),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _evil_twin_escanear_redes(self, deauth_iface):
         self.wifi_state["deauth_iface"] = deauth_iface
@@ -756,7 +769,6 @@ class RedTeamApp(tk.Tk):
         self.escribir_consola("[*] Escaneando redes...")
 
     def _evil_twin_mostrar_redes(self, redes):
-        """Lista scrollable de redes para Evil Twin."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(self._wifi_evil_twin)
         ttk.Label(self.main_frame, text="RED OBJETIVO", style='Title.TLabel').pack(pady=2)
@@ -769,7 +781,7 @@ class RedTeamApp(tk.Tk):
             texto = f"{red['essid']} (CH:{red['ch']})"
             scroll.add_button(text=texto, command=lambda r=red: self._evil_twin_seleccionar_portal(r),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _evil_twin_seleccionar_portal(self, red):
@@ -789,7 +801,7 @@ class RedTeamApp(tk.Tk):
             if os.path.isfile(os.path.join(portals_dir, portal, "index.html")):
                 scroll.add_button(text=portal, command=lambda p=portal: self._evil_twin_seleccionar_deauth_mode(red, p),
                                   style='Red.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _evil_twin_seleccionar_deauth_mode(self, red, portal):
@@ -797,13 +809,16 @@ class RedTeamApp(tk.Tk):
         self.limpiar_main_frame()
         self.agregar_boton_atras(lambda: self._evil_twin_seleccionar_portal(red))
         ttk.Label(self.main_frame, text="MODO DEAUTH", style='Title.TLabel').pack(pady=2)
-        ttk.Button(self.main_frame, text="Broadcast", style='Danger.TButton',
-                   command=lambda: self._evil_twin_ejecutar(red, portal, "broadcast")).pack(fill='x', padx=10,
-                                                                                            pady=2)
-        ttk.Button(self.main_frame, text="Dirigido", style='Red.TButton',
-                   command=lambda: self._evil_twin_escanear_clientes(red, portal)).pack(fill='x', padx=10,
-                                                                                        pady=2)
-        self.mostrar_consola()
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        scroll.add_button(text="Broadcast", command=lambda: self._evil_twin_ejecutar(red, portal, "broadcast"),
+                          style='Danger.TButton', width=28)
+        scroll.add_button(text="Dirigido", command=lambda: self._evil_twin_escanear_clientes(red, portal),
+                          style='Red.TButton', width=28)
+                          
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _evil_twin_escanear_clientes(self, red, portal):
         mon = self.wifi_state.get("mon_deauth")
@@ -837,7 +852,7 @@ class RedTeamApp(tk.Tk):
             scroll.add_button(text=mac,
                               command=lambda m=mac: self._evil_twin_ejecutar(red, portal, "directed", m),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _evil_twin_ejecutar(self, red, portal, deauth_mode, cliente_mac=None):
@@ -848,9 +863,14 @@ class RedTeamApp(tk.Tk):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_wifi_menu)
         ttk.Label(self.main_frame, text="EVIL TWIN ACTIVO", style='Title.TLabel').pack(pady=2)
-        ttk.Button(self.main_frame, text="DETENER ATAQUE", style='Danger.TButton',
-                   command=self._evil_twin_detener).pack(pady=5, fill='x', padx=10)
-        self.mostrar_consola()
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        scroll.add_button(text="DETENER ATAQUE", command=self._evil_twin_detener,
+                          style='Danger.TButton', width=28)
+                          
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
         self.evil_twin_stop = False
 
@@ -1012,10 +1032,15 @@ if __name__ == "__main__":
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_wifi_menu)
         ttk.Label(self.main_frame, text="DEAUTH - IFace", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         for iface in self.obtener_interfaces_red():
-            ttk.Button(self.main_frame, text=iface, style='Red.TButton',
-                       command=lambda i=iface: self._deauth_escanear(i)).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=iface, command=lambda i=iface: self._deauth_escanear(i),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _deauth_escanear(self, iface):
         self.wifi_state = {"iface": iface}
@@ -1045,7 +1070,6 @@ if __name__ == "__main__":
         self.after(0, lambda: self._deauth_mostrar_redes(redes))
 
     def _deauth_mostrar_redes(self, redes):
-        """Scrollable para redes en modo deauth."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(self._wifi_deauth)
         ttk.Label(self.main_frame, text="SELECCIONA RED", style='Title.TLabel').pack(pady=2)
@@ -1058,7 +1082,7 @@ if __name__ == "__main__":
             texto = f"{red['essid']} (CH:{red['ch']})"
             scroll.add_button(text=texto, command=lambda r=red: self._deauth_seleccionar_modo(r),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _deauth_seleccionar_modo(self, red):
@@ -1066,11 +1090,16 @@ if __name__ == "__main__":
         self.limpiar_main_frame()
         self.agregar_boton_atras(self._wifi_deauth)
         ttk.Label(self.main_frame, text="MODO DE ATAQUE", style='Title.TLabel').pack(pady=2)
-        ttk.Button(self.main_frame, text="Broadcast (Todos)", style='Danger.TButton',
-                   command=lambda: self._deauth_ejecutar("FF:FF:FF:FF:FF:FF")).pack(fill='x', padx=10, pady=2)
-        ttk.Button(self.main_frame, text="Cliente específico", style='Red.TButton',
-                   command=lambda: self._deauth_escanear_clientes(red)).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        scroll.add_button(text="Broadcast (Todos)", command=lambda: self._deauth_ejecutar("FF:FF:FF:FF:FF:FF"),
+                          style='Danger.TButton', width=28)
+        scroll.add_button(text="Cliente específico", command=lambda: self._deauth_escanear_clientes(red),
+                          style='Red.TButton', width=28)
+                          
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _deauth_escanear_clientes(self, red):
         mon = self.wifi_state["mon_iface"]
@@ -1102,7 +1131,7 @@ if __name__ == "__main__":
         for mac in clientes:
             scroll.add_button(text=mac, command=lambda m=mac: self._deauth_ejecutar(m),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _deauth_ejecutar(self, cliente):
@@ -1113,22 +1142,24 @@ if __name__ == "__main__":
         self.limpiar_main_frame()
         self.agregar_boton_atras(self._wifi_deauth)
         ttk.Label(self.main_frame, text="INTENSIDAD", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
         for texto, count in [("Continuo (0)", "0"), ("1 ráfaga (5)", "5"), ("3 ráfagas (15)", "15")]:
-            ttk.Button(self.main_frame, text=texto, style='Red.TButton',
-                       command=lambda c=count: self.ejecutar_comando(
-                           f"sudo aireplay-ng --deauth {c} -a {red['bssid']} -c {cliente} {mon}"
-                       )).pack(fill='x', padx=10, pady=2)
-        self.mostrar_consola()
+            scroll.add_button(text=texto, 
+                              command=lambda c=count: self.ejecutar_comando(f"sudo aireplay-ng --deauth {c} -a {red['bssid']} -c {cliente} {mon}"),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
 
     def _wifi_explorar_handshakes(self):
-        # Ahora usa scrollable interno
         self._mostrar_explorador_generico(BASE_DIR_WIFI, "CAPTURAS", self.show_wifi_menu)
 
     def _wifi_explorar_evil(self):
         self._mostrar_explorador_generico(BASE_DIR_EVIL, "EVIL TWIN RES", self.show_wifi_menu)
 
     def _mostrar_explorador_generico(self, base_dir, titulo, callback_volver):
-        """Explorador genérico con scroll (sin paginación)."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(callback_volver)
         ttk.Label(self.main_frame, text=titulo, style='Title.TLabel').pack(pady=2)
@@ -1145,11 +1176,10 @@ if __name__ == "__main__":
             scroll.add_button(text=carpeta,
                               command=lambda r=ruta: self._mostrar_archivos_generico(r, callback_volver, base_dir),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _mostrar_archivos_generico(self, ruta, callback_volver, base_dir):
-        """Archivos con scroll, sin paginación."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(lambda: self._mostrar_explorador_generico(base_dir, "", callback_volver))
         nombre = os.path.basename(ruta)
@@ -1166,14 +1196,13 @@ if __name__ == "__main__":
                 cmd = f"aircrack-ng '{arch_path}'"
             else:
                 cmd = f"cat '{arch_path}'"
-            scroll.add_button(text=archivo,
-                              command=lambda c=cmd: self.ejecutar_comando(c),
+            scroll.add_button(text=archivo, command=lambda c=cmd: self.ejecutar_comando(c),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     # ==========================================
-    # MENÚ BLUETOOTH BLE (con scroll en listas)
+    # MENÚ BLUETOOTH BLE
     # ==========================================
     def _init_gadget(self):
         if self._gadget_initialized:
@@ -1184,7 +1213,7 @@ if __name__ == "__main__":
             self.gadget = BLEGadget()
             if self.gadget.is_available():
                 self.gadget_available = True
-                self.escribir_consola("[+] Gadget ESP32 BLE conectado correctamente.")
+                self.escribir_consola("[+] Gadget ESP32 BLE conectado.")
             else:
                 self.gadget_available = False
                 self.escribir_consola("[!] Gadget ESP32 BLE no detectado.")
@@ -1199,13 +1228,15 @@ if __name__ == "__main__":
         ttk.Label(self.main_frame, text="AUDITORÍA BLUETOOTH", style='Title.TLabel').pack(pady=2)
 
         self._init_gadget()
+        
+        # Todo dentro del scroll
+        scroll_ble = ScrollableFrame(self.main_frame, max_items=20)
+        scroll_ble.pack(fill='both', expand=True, padx=2, pady=2)
+        
         gadget_status = "Conectado" if self.gadget_available else "Desconectado"
         status_color = "#00ff00" if self.gadget_available else "#ff4d4d"
-        ttk.Label(self.main_frame, text=f"Gadget: {gadget_status}",
+        ttk.Label(scroll_ble.scrollable_frame, text=f"Gadget: {gadget_status}",
                   foreground=status_color, font=('Helvetica', 9)).pack(pady=2)
-
-        btn_frame = ttk.Frame(self.main_frame, style='Dark.TFrame')
-        btn_frame.pack(fill='both', expand=True, padx=5, pady=2)
 
         if self.gadget_available:
             opciones = [
@@ -1221,17 +1252,16 @@ if __name__ == "__main__":
         else:
             opciones = [("Scan Dispositivos BLE", self._ble_escanear)]
 
-        scroll = ScrollableFrame(btn_frame, max_items=10)
-        scroll.pack(fill='both', expand=True)
         for text, cmd in opciones:
             style_btn = 'Danger.TButton' if "Detener" in text else 'Red.TButton'
-            scroll.add_button(text=text, command=cmd, style=style_btn, width=26)
+            scroll_ble.add_button(text=text, command=cmd, style=style_btn, width=28)
 
-        ttk.Button(self.main_frame, text="Explorar Resultados", style='Gray.TButton',
+        ttk.Button(scroll_ble.scrollable_frame, text="Explorar Resultados", style='Gray.TButton',
                    command=lambda: self._mostrar_explorador_generico(BASE_DIR_BLE, "RESULTADOS BLE",
                                                                      self.show_bluetooth_menu)
                    ).pack(fill='x', padx=10, pady=3)
-        self.mostrar_consola()
+                   
+        self.mostrar_consola(parent=scroll_ble.scrollable_frame)
         gc.collect()
 
     def _ble_scan_gadget(self, module):
@@ -1246,7 +1276,6 @@ if __name__ == "__main__":
         self.gadget.scan(module, 10, callback)
 
     def _ble_gadget_mostrar_dispositivos(self, dispositivos, module):
-        """Lista scrollable de dispositivos BLE encontrados por gadget."""
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_bluetooth_menu)
         ttk.Label(self.main_frame, text="DISPOSITIVOS (Gadget)", style='Title.TLabel').pack(pady=2)
@@ -1259,7 +1288,7 @@ if __name__ == "__main__":
             texto = f"{dev['name'][:15]} ({dev['mac']})"
             scroll.add_button(text=texto, command=lambda d=dev: self._ble_acciones(d),
                               style='Gray.TButton', width=28)
-        self.mostrar_consola()
+        self.mostrar_consola(parent=scroll.scrollable_frame)
         gc.collect()
 
     def _bluejacking_gui(self):
@@ -1290,4 +1319,411 @@ if __name__ == "__main__":
         ch_str = simpledialog.askstring("Jammer", "Canal(0-78):")
         if not ch_str: return
         dur_str = simpledialog.askstring("Jammer", "Segundos:")
-        if not dur_str: ret
+        if not dur_str: return
+        self.gadget.jam(0, int(ch_str), int(dur_str))
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ttk.Label(self.main_frame, text=f"Jamming canal {ch_str}", style='Title.TLabel').pack(pady=5)
+        ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
+                   command=lambda: self.gadget.stop(0)).pack(pady=5)
+        self.mostrar_consola()
+
+    def _sweep_jammer_gui(self):
+        dur_str = simpledialog.askstring("Barrido", "Segundos:")
+        if not dur_str: return
+        self.gadget.sweep_jam(0, int(dur_str))
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ttk.Label(self.main_frame, text="Barrido activo", style='Title.TLabel').pack(pady=5)
+        ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
+                   command=lambda: self.gadget.stop(0)).pack(pady=5)
+        self.mostrar_consola()
+
+    def _gadget_stop_all(self):
+        self.gadget.stop(0)
+        self.gadget.stop(1)
+
+    def _gadget_status(self):
+        if self.gadget_available:
+            self.escribir_consola(f"[+] Estado gadget: {self.gadget.status()}")
+
+    def _ble_escanear(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ttk.Label(self.main_frame, text="ESCANEANDO BLE...", style='Title.TLabel').pack(pady=5)
+        self.mostrar_consola()
+
+        def escanear():
+            subprocess.run(["sudo", "hciconfig", "hci0", "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            subprocess.run("sudo bluetoothctl scan on &", shell=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            time.sleep(12)
+            subprocess.run(["sudo", "bluetoothctl", "scan", "off"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            dispositivos = []
+            try:
+                output = subprocess.check_output("sudo bluetoothctl devices", shell=True, text=True)
+                for line in output.splitlines():
+                    if "Device" in line:
+                        parts = line.strip().split(' ', 2)
+                        if len(parts) >= 3: dispositivos.append({"mac": parts[1], "nombre": parts[2]})
+            except:
+                pass
+            self.after(0, lambda: self._mostrar_dispositivos_ble(dispositivos))
+
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _mostrar_dispositivos_ble(self, dispositivos):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ttk.Label(self.main_frame, text="DISPOSITIVOS BLE", style='Title.TLabel').pack(pady=2)
+        if not dispositivos:
+            ttk.Label(self.main_frame, text="No se encontraron.", style='Dark.TLabel').pack()
+            return
+        scroll = ScrollableFrame(self.main_frame, max_items=50)
+        scroll.pack(fill='both', expand=True, padx=5, pady=2)
+        for dev in dispositivos:
+            texto = f"{dev['nombre'][:15]} ({dev['mac']})"
+            scroll.add_button(text=texto, command=lambda d=dev: self._ble_conectar_legacy(d['mac']),
+                              style='Gray.TButton', width=28)
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        gc.collect()
+
+    def _ble_conectar_legacy(self, mac):
+        self.escribir_consola(f"[*] Conectando a {mac}...")
+
+        def conectar():
+            try:
+                subprocess.run(f"sudo bluetoothctl pair {mac}", shell=True, timeout=30)
+                subprocess.run(f"sudo bluetoothctl connect {mac}", shell=True, timeout=30)
+                self.escribir_consola(f"[+] Conectado a {mac}")
+            except Exception as e:
+                self.escribir_consola(f"[!] Error: {e}")
+
+        threading.Thread(target=conectar, daemon=True).start()
+
+    # ==========================================
+    # MENÚ RUBBER DUCKY 
+    # ==========================================
+    def show_ducky_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ttk.Label(self.main_frame, text="PAYLOADS DUCKY", style='Title.TLabel').pack(pady=2)
+        payloads_dir = "payloads"
+        os.makedirs(payloads_dir, exist_ok=True)
+        archivos = [f for f in os.listdir(payloads_dir) if f.endswith(".txt")]
+
+        scroll = ScrollableFrame(self.main_frame, max_items=50)
+        scroll.pack(fill='both', expand=True, padx=5, pady=2)
+        if not archivos:
+            ttk.Label(scroll.scrollable_frame, text="No hay payloads.", style='Dark.TLabel').pack()
+        else:
+            for archivo in archivos:
+                ruta = os.path.join(payloads_dir, archivo)
+                scroll.add_button(text=archivo, style='Red.TButton', width=28,
+                                  command=lambda r=ruta: self._ejecutar_ducky(r))
+                                  
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        gc.collect()
+
+    def _import_ducky_logic(self):
+        if not hasattr(self, '_ducky_logic'):
+            import ducky_logic
+            self._ducky_logic = ducky_logic
+        return self._ducky_logic
+
+    def _ejecutar_ducky(self, ruta):
+        ducky = self._import_ducky_logic()
+        self.escribir_consola(f"\n[+] Exec: {os.path.basename(ruta)}")
+
+        def run():
+            time.sleep(2)
+            try:
+                ducky.ejecutar_script_ducky(ruta)
+                self.escribir_consola("[+] Hecho.")
+            except Exception as e:
+                self.escribir_consola(f"[!] Error: {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # ==========================================
+    # MENÚ UTILIDADES 
+    # ==========================================
+    def show_utils_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ttk.Label(self.main_frame, text="UTILIDADES", style='Title.TLabel').pack(pady=2)
+
+        # Usamos el ScrollableFrame para envolver TODA la pantalla
+        scroll_utils = ScrollableFrame(self.main_frame, max_items=20)
+        scroll_utils.pack(fill='both', expand=True, padx=2, pady=2)
+
+        opciones = [
+            ("Conectar a Red WiFi", self._utils_wifi_seleccionar_interfaz),
+            ("Estado de Red WiFi", self._utils_wifi_estado),
+            ("Conectar Dispositivo BT", self._utils_bluetooth_seleccionar_interfaz),
+            ("Estado de Adaptador BT", self._utils_bluetooth_estado)
+        ]
+        for texto, cmd in opciones:
+            scroll_utils.add_button(text=texto, command=cmd, style='Red.TButton', width=28)
+
+        ttk.Label(scroll_utils.scrollable_frame, text="SISTEMA", style='Title.TLabel').pack(pady=(4, 2))
+        
+        comandos_sys = [
+            ("Almacenamiento", "df -h"),
+            ("Memoria RAM", "free -h"),
+            ("Top CPU", "ps aux --sort=-%cpu | head -6"),
+            ("Conexiones", "ss -tulnp | head -10")
+        ]
+        for nombre, cmd in comandos_sys:
+            scroll_utils.add_button(text=nombre,
+                                  command=lambda c=cmd: self.ejecutar_comando(c, use_shell=True),
+                                  style='Gray.TButton', width=28)
+
+        sys_opts = ttk.Frame(scroll_utils.scrollable_frame, style='Dark.TFrame')
+        sys_opts.pack(fill='x', padx=5, pady=5)
+        sys_opts.grid_columnconfigure((0, 1), weight=1)
+        ttk.Button(sys_opts, text="REINICIAR", style='Danger.TButton',
+                   command=lambda: subprocess.run("reboot", shell=True)).grid(row=0, column=0, padx=2,
+                                                                              sticky="ew")
+        ttk.Button(sys_opts, text="APAGAR", style='Danger.TButton',
+                   command=lambda: subprocess.run("shutdown -h now", shell=True)).grid(row=0, column=1, padx=2,
+                                                                                        sticky="ew")
+                                                                                        
+        self.mostrar_consola(parent=scroll_utils.scrollable_frame)
+        gc.collect()
+
+    # -------------------- UTILIDADES WiFi --------------------
+    def obtener_interfaces_wifi(self):
+        interfaces = []
+        try:
+            output = subprocess.check_output("iw dev | grep Interface", shell=True, text=True)
+            for line in output.splitlines():
+                interfaces.append(line.split()[-1])
+        except:
+            pass
+        return interfaces if interfaces else []
+
+    def _utils_wifi_seleccionar_interfaz(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ttk.Label(self.main_frame, text="IFACE WIFI", style='Title.TLabel').pack(pady=2)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        for iface in self.obtener_interfaces_wifi():
+            scroll.add_button(text=iface, command=lambda i=iface: self._utils_wifi_escanear_redes(i),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+
+    def _utils_wifi_escanear_redes(self, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="ESCANEANDO...", style='Title.TLabel').pack(pady=2)
+        self.mostrar_consola()
+
+        def escanear():
+            subprocess.run(f"nmcli device wifi rescan ifname {iface}", shell=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            time.sleep(2)
+            try:
+                output = subprocess.check_output(f"nmcli -t -f SSID,SECURITY,SIGNAL device wifi list ifname {iface}",
+                                                 shell=True, text=True, stderr=subprocess.DEVNULL)
+                redes = []
+                for line in output.strip().split('\n'):
+                    if not line.strip(): continue
+                    parts = line.split(':')
+                    if len(parts) >= 3: redes.append(
+                        {"ssid": parts[0] or "<Oculta>", "security": parts[1] or "Ninguna", "signal": parts[2]})
+                self.after(0, lambda: self._utils_wifi_mostrar_redes(iface, redes))
+            except:
+                self.after(0, lambda: self._utils_wifi_mostrar_redes(iface, []))
+
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _utils_wifi_mostrar_redes(self, iface, redes):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="REDES", style='Title.TLabel').pack(pady=2)
+        if not redes:
+            ttk.Label(self.main_frame, text="No disponibles.", style='Dark.TLabel').pack()
+            return
+        scroll = ScrollableFrame(self.main_frame, max_items=50)
+        scroll.pack(fill='both', expand=True, padx=5, pady=2)
+        for red in redes:
+            texto = f"{red['ssid']} | {red['signal']}%"
+            scroll.add_button(text=texto,
+                              command=lambda r=red: self._utils_wifi_conectar(iface, r['ssid'], r['security']),
+                              style='Gray.TButton', width=28)
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        gc.collect()
+
+    def _utils_wifi_conectar(self, iface, ssid, security):
+        if security and security.lower() != "none" and "wep" not in security.lower():
+            password = simpledialog.askstring("WiFi", f"Password para '{ssid}':")
+            if not password: return
+        else:
+            password = None
+
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._utils_wifi_escanear_redes(iface))
+        ttk.Label(self.main_frame, text=f"CONECTANDO...", style='Title.TLabel').pack(pady=5)
+        self.mostrar_consola()
+
+        def conectar():
+            try:
+                cmd = f"nmcli device wifi connect '{ssid}' password '{password}' ifname {iface}" if password else f"nmcli device wifi connect '{ssid}' ifname {iface}"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if result.returncode == 0:
+                    state_out = subprocess.check_output(f"nmcli -t -f GENERAL.STATE dev show {iface}", shell=True,
+                                                        text=True)
+                    estado = "ÉXITO" if "100 (connected)" in state_out else "ADVERTENCIA"
+                else:
+                    estado = f"ERROR: {result.stderr.strip()}"
+            except Exception as e:
+                estado = f"EXCEPCIÓN: {e}"
+            self.after(0, lambda: self._utils_wifi_mostrar_resultado(estado, iface))
+
+        threading.Thread(target=conectar, daemon=True).start()
+
+    def _utils_wifi_mostrar_resultado(self, mensaje, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="RESULTADO", style='Title.TLabel').pack(pady=5)
+        ttk.Label(self.main_frame, text=mensaje, wraplength=300).pack(pady=5)
+        self.mostrar_consola()
+
+    def _utils_wifi_estado(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ttk.Label(self.main_frame, text="ESTADO WIFI", style='Title.TLabel').pack(pady=5)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        for iface in self.obtener_interfaces_wifi():
+            self.ejecutar_comando(f"nmcli -t -f GENERAL.STATE,IP4.ADDRESS dev show {iface} | head -2")
+
+    # -------------------- UTILIDADES BLUETOOTH --------------------
+    def obtener_interfaces_bluetooth(self):
+        interfaces = []
+        try:
+            output = subprocess.check_output("hciconfig -a | grep 'hci'", shell=True, text=True)
+            for line in output.splitlines():
+                if "hci" in line:
+                    interfaces.append(line.split(':')[0].strip())
+        except:
+            pass
+        return interfaces if interfaces else []
+
+    def _utils_bluetooth_seleccionar_interfaz(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ttk.Label(self.main_frame, text="ADAPTADOR BT", style='Title.TLabel').pack(pady=5)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        for iface in self.obtener_interfaces_bluetooth():
+            scroll.add_button(text=iface, command=lambda i=iface: self._utils_bluetooth_escanear(i),
+                              style='Red.TButton', width=28)
+                              
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+
+    def _utils_bluetooth_escanear(self, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="ESCANEANDO BT...", style='Title.TLabel').pack(pady=5)
+        self.mostrar_consola()
+
+        def escanear():
+            subprocess.run(["sudo", "hciconfig", iface, "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for cmd_text in ["select", "power on", "discoverable on", "pairable on"]:
+                subprocess.run(f"sudo bluetoothctl -- {cmd_text}", shell=True, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            subprocess.run("sudo bluetoothctl -- scan on &", shell=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            time.sleep(12)
+            subprocess.run(["sudo", "bluetoothctl", "--", "scan", "off"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+            dispositivos = []
+            try:
+                output = subprocess.check_output("sudo bluetoothctl -- devices", shell=True, text=True)
+                for line in output.splitlines():
+                    if "Device" in line:
+                        parts = line.strip().split(' ', 2)
+                        if len(parts) >= 3:
+                            dispositivos.append({"mac": parts[1], "nombre": parts[2]})
+            except:
+                pass
+            self.after(0, lambda: self._utils_bluetooth_mostrar_dispositivos(iface, dispositivos))
+
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _utils_bluetooth_mostrar_dispositivos(self, iface, dispositivos):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="DISPOSITIVOS", style='Title.TLabel').pack(pady=2)
+        if not dispositivos:
+            ttk.Label(self.main_frame, text="No encontrados.", style='Dark.TLabel').pack()
+            return
+        scroll = ScrollableFrame(self.main_frame, max_items=50)
+        scroll.pack(fill='both', expand=True, padx=5, pady=2)
+        for dev in dispositivos:
+            texto = f"{dev['nombre'][:15]} ({dev['mac']})"
+            scroll.add_button(text=texto,
+                              command=lambda d=dev: self._utils_bluetooth_conectar(iface, d['mac'], d['nombre']),
+                              style='Gray.TButton', width=28)
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        gc.collect()
+
+    def _utils_bluetooth_conectar(self, iface, mac, nombre):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._utils_bluetooth_escanear(iface))
+        ttk.Label(self.main_frame, text="CONECTANDO...", style='Title.TLabel').pack(pady=5)
+        self.mostrar_consola()
+
+        def conectar():
+            try:
+                pair = subprocess.run(f"sudo bluetoothctl -- pair {mac}", shell=True, capture_output=True, text=True,
+                                      timeout=30)
+                if "Pairing successful" in pair.stdout or "Paired: yes" in pair.stdout:
+                    connect = subprocess.run(f"sudo bluetoothctl -- connect {mac}", shell=True, capture_output=True,
+                                             text=True, timeout=30)
+                    estado = "ÉXITO" if "Connection successful" in connect.stdout or "Connected: yes" in connect.stdout else "ERROR"
+                else:
+                    estado = "FALLO PAIR"
+            except Exception as e:
+                estado = f"EXCEPCIÓN: {e}"
+            self.after(0, lambda: self._utils_bt_mostrar_resultado(estado))
+
+        threading.Thread(target=conectar, daemon=True).start()
+
+    def _utils_bt_mostrar_resultado(self, mensaje):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ttk.Label(self.main_frame, text="RESULTADO", style='Title.TLabel').pack(pady=5)
+        ttk.Label(self.main_frame, text=mensaje, wraplength=300).pack(pady=5)
+        self.mostrar_consola()
+
+    def _utils_bluetooth_estado(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ttk.Label(self.main_frame, text="ESTADO BT", style='Title.TLabel').pack(pady=5)
+        
+        scroll = ScrollableFrame(self.main_frame, max_items=10)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        for iface in self.obtener_interfaces_bluetooth():
+            self.ejecutar_comando(f"hciconfig {iface} -a")
+
+
+if __name__ == "__main__":
+    app = RedTeamApp()
+    app.mainloop()
