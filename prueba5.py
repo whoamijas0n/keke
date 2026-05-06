@@ -54,8 +54,8 @@ class ScrollableFrame(tk.Frame):
 
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
 
         # Eventos táctiles y ratón
         self.canvas.bind("<Button-1>", self._on_touch_start)
