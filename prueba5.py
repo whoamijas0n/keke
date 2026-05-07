@@ -10,6 +10,72 @@ import tempfile
 from datetime import datetime
 import glob
 import gc
+import random  # <-- AÑADIDO PARA EL EFECTO DE RUIDO
+
+# Pegar tu arte gigante en una variable global
+ARTE_DRAGON = """
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                                                                                                                    
+                                                                      ▒▒                    ░░░░                                                                    
+                                                                        ░░                  ▒▒                                                                      
+                                                                        ░░░░      ▒▒▓▓      ▒▒░░                                                                    
+                                                                          ▒▒    ▒▒▒▒▒▒▒▒    ▓▓                                                                      
+                                                                          ░░▒▒  ▒▒▒▒▒▒▒▒  ▒▒░░  ░░                                                                  
+                                  ░░░░░░░░░░░░░░                              ░░    ▒▒▒▒░░▒▒░░▒▒  ░░▒▒                  ░░░░░░░░░░░░░░░░░░░░░░                      
+                      ░░░░▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░▒▒░░░░░░░░░░░░░░░░░░        ▒▒    ▒▒████▓▓░░░░░░      ░░░░░░░░░░░░░░░░▒▒▓▓▓▓▒▒▒▒▓▓▒▒▒▒▒▒▒▒░░▒▒░░░░░░░░░░░░    
+              ░░████▓▓▒▒░░▓▓▒▒▒▒░░▒▒░░░░░░░░▒▒▒▒░░░░▒▒▒▒░░▒▒██▓▓░░▓▓▒▒▒▒▒▒▒▒░░░░░░░░▒▒▒▒▒▒▒▒▒▒░░▓▓░░░░░░░░░░▓▓▒▒▒▒▓▓▒▒░░▒▒░░░░░░▒▒  ░░░░▒▒▒▒░░░░░░▒▒▒▒▒▒▓▓▓▓▒▒▒▒▒▒░░██▓▓▒▒░░            
+        ░░░░░░░░░░▓▓▒▒░░░░░░▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ░░▓▓▓▓▒▒░░░░░░░░▒▒░░▒▒░░░░░░▓▓▓▓▓▓▒▒▒▒░░▓▓▓▓░░▒▒▒▒▒▒▒▒░░▒▒▒▒▒▒▒▒▒▒░░░░░░░░▓▓▓▓░░░░▒▒░░░░░░░░░░▒▒▒▒▒▒▒▒░░░░░░▒▒▒▒▒▒░░░░▒▒░░░░░░        
+      ░░░░░░░░░░▓▓▒▒▒▒▓▓  ░░▒▒░░▒▒░░▒▒░░▒▒▓▓██▓▓████▒▒▒▒▒▒░░▒▒▒▒░░░░░░░░░░░░░░▒▒▒▒░░▒▒▒▒░░▓▓▓▓░░▒▒▒▒▒▒░░▒▒░░░░░░░░░░░░░░▒▒▒▒▓▓░░▓▓████░░░░░░░░▒▒▒▒▒▒▒▒░░░░░░▓▓▒▒▓▓░░░░░░░░░░░░░░░░      
+      ░░▒▒▒▒▒▒░░▒▒▒▒▓▓▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▒░░░░▒▒▒▒▓▓██▓▓▒▒░░░░░░▒▒░░░░░░▒▒░░░░▒▒▒▒▒▒▒▒░░▒▒░░▒▒▒▒░░▒▒▒▒░░▒▒▒▒▒▒▒▒░░▒▒▒▒░░░░▒▒░░░░▓▓▓▓▓▓▓▓▒▒░░▒▒▒▒░░▒▒▒▒░░░░▒▒░░▒▒▓▓▒▒░░░░░░░░░░░░░░░░░░    
+      ░░░░░░░░░░▒▒▒▒▒▒░░░░▒▒▒▒░░▒▒▒▒▒▒░░▒▒▒▒░░▓▓▒▒▒▒▒▒▒▒░░░░░░░░▒▒░░▒▒▒▒░░▒▒░░▒▒▓▓▒▒▒▒▒▒░░▓▓▒▒░░▒▒▒▒░░▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▒░░░░▒▒▒▒░░▒▒▓▓▒▒▒▒░░▒▒░░░░░░░░░░▒▒▒▒░░▒▒▓▓░░▒▒▒▒▒▒░░░░░░░░      
+        ░░░░░░▒▒░░░░░░▒▒░░░░▒▒░░▒▒▒▒▒▒▒▒▒▒░░░░▒▒░░░░░░▒▒░░▓▓▓▓▒▒░░░░░░▒▒▒▒▒▒▒▒▒▒░░░░░░▓▓░░▒▒▒▒░░▓▓░░▒▒▒▒░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░▒▒▒▒▓▓▒▒░░▒▒▒▒░░▒▒▒▒░░░░▒▒░░▒▒▒▒▒▒▒▒░░░░▒▒▒▒░░░░░░░░░░        
+            ░░░░▒▒░░▒▒░░▒▒▒▒▒▒░░░░▓▓▒▒░░░░░░▒▒▒▒▒▒▓▓░░░░░░░░░░░░▒▒▓▓▓▓▒▒▒▒▒▒░░░░▒▒▒▒▒▒▒▒░░▓▓▓▓▒▒▓▓░░▒▒░░░░▒▒░░▒▒▓▓▓▓▒▒▒▒▒▒▓▓▓▓░░▒▒░░░░▒▒▓▓▒▒▒▒░░░░▒▒▒▒░░▒▒▒▒░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░          
+                ░░░░░░▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒██▓▓░░▒▒░░░░▒▒░░░░░░░░▒▒▒▒▒▒▒▒░░░░░░░░▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▒▓▓██▒▒▒▒▒▒▒▒▓▓▒▒░░▓▓▒▒▒▒▒▒░░░░░░░░▒▒▒▒▒▒▒▒▒▒▒▒░░              
+                      ░░░░░░░░░░░░░░▒▒▒▒▓▓██▓▓▓▓▒▒▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▒▓▓▒▒░░░░▒▒▒▒▒▒▒▒▓▓▒▒  ░░▓▓▒▒░░  ░░▒▒▒▒░░▒▒▒▒░░░░░░▓▓▓▓▒▒▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▒▒▓▓▒▒▒▒▒▒░░░░░░░░░░                    
+                                  ░░░░░░░░░░░░░░░░▒▒░░▒▒▒▒▒▒▒▒▓▓▒▒░░░░░░▒▒░░▒▒▒▒▓▓▓▓░░    ▒▒▒▒    ░░▓▓▓▓▒▒░░░░▒▒▒▒▒▒░░▒▒▒▒▓▓▒▒▒▒▓▓░░▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░                            
+                                            ░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▒▒▒▒▒▒▒░░▒▒▒▒▓▓░░      ▒▒▒▒      ░░▒▒▒▒▒▒▒▒░░▒▒▒▒▒▒▒▒░░░░▓▓▒▒▒▒▒▒▓▓▒▒▒▒▒▒░░░░░░                                      
+                                        ░░▒▒▒▒▒▒▓▓▓▓▒▒▓▓▓▓▒▒░░▒▒▒▒▒▒░░▒▒▒▒▒▒▓▓▓▓░░        ▒▒▒▒        ░░░░▓▓▓▓▒▒░░░░░░▒▒▒▒░░░░▒▒▒▒▒▒▒▒░░▓▓▓▓▓▓▒▒░░░░░░                                  
+                                  ░░▒▒▒▒▓▓▓▓▓▓▒▒▒▒▒▒░░▒▒▓▓▒▒░░░░▒▒▒▒░░░░▒▒▒▒▒▒░░          ▒▒▒▒            ░░░░▒▒▓▓▒▒░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▒▒▒▒░░░░░░░░                              
+                              ░░▒▒▒▒▒▒▒▒▓▓▒▒░░▓▓▓▓▒▒▒▒▒▒░░▒▒▒▒▒▒░░▒▒▒▒▒▒▓▓░░              ▒▒░░                ░░▒▒▓▓▒▒▒▒░░░░▒▒▒▒░░▒▒▒▒▒▒▒▒▓▓▓▓▒▒░░░░▒▒░░▒▒▒▒░░                          
+                        ░░░░▒▒▒▒▒▒▓▓▒▒▒▒▓▓▒▒▓▓██████▓▓░░▒▒▓▓░░▒▒▒▒▓▓▒▒░░░░                ▓▓                  ░░░░▓▓▓▓▒▒░░░░▒▒▒▒░░▒▒▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒░░▒▒░░░░                        
+                    ░░░░░░▒▒▒▒▒▒▒▒░░▒▒▒▒▒▒██▓▓▓▓▓▓▓▓▒▒░░▒▒▒▒░░▒▒▒▒▒▒░░                    ▒▒░░                    ░░▒▒▒▒▒▒▒▒▒▒░░▒▒░░▓▓████▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░░░                      
+                ▒▒░░▒▒▒▒▓▓▒▒▒▒▒▒▒▒▓▓▒▒▒▒░░░░▒▒██▓▓░░▒▒▒▒▒▒▓▓▓▓▒▒░░                        ▒▒░░                        ░░▓▓▒▒░░▒▒░░▒▒░░▓▓████▓▓▒▒▒▒▒▒▒▒░░░░░░░░▒▒░░░░░░                
+            ▒▒██░░░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▒▒▒▒░░████░░░░▒▒▒▒▒▒▓▓░░░░                          ▓▓                              ░░░░▓▓▓▓▒▒░░░░░░████▓▓▒▒▒▒▓▓▓▓▒▒░░░░░░▒▒▒▒▒▒░░██▒▒            
+        ░░░░▒▒  ▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓░░▒▒▒▒░░▒▒▓▓▓▓░░░░                              ▓▓░░                                ░░░░▓▓▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▓▓▒▒▒▒░░░░░░▒▒░░  ▒▒▒▒██░░        
+      ░░▒▒░░░░  ▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▓▓▓▒▒░░▒▒▒▒▓▓▒▒░░░░                                  ▓▓                                      ░░▒▒▒▒▓▓▓▓▒▒▒▒▓▓▒▒▒▒▓▓▒▒▒▒░░░░░░▒▒░░░░░░▒▒░░░░░░      
+      ░░░░░░░░▒▒░░░░▒▒░░▒▒▒▒▒▒▒▒▒▒░░▒▒░░░░▒▒░░▒▒░░░░                                      ▓▓                                          ░░░░░░░░░░▒▒▒▒▒▒▓▓▒▒▒▒░░░░▒▒▒▒  ░░░░░░░░  ▓▓░░    
+            ░░░░░░░░░░░░░░  ░░░░░░░░░░░░                                                  ▒▒░░                                              ░░░░░░░░░░▒▒▒▒░░▒▒▒▒▒▒▒▒░░  ▒▒▒▒░░▒▒░░      
+                                                                                          ▓▓                                                      ░░▒▒▒▒░░░░░░░░░░░░░░░░░░              
+                                                                                          ▒▒                                                                      ░░                    
+                                                                                          ▓▓                                                                                            
+                                                                                          ▓▓                                                                                            
+                                                                                          ▒▒                                                                                            
+                                                                                          ▓▓░░                                                                                          
+                                                                                          ▓▓░░                                                                                          
+                                                                                          ▒▒░░                                                                                          
+                                                                                          ▓▓▒▒                                                                                          
+                                                                                          ▒▒░░                                                                                          
+                                                                                          ░░░░                                                                                          
+                                                                                          ▒▒▒▒                                                                                          
+                                                                                          ░░▒▒                                                                                          
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+                                                                                                                                                                                        
+"""
+
 
 # ==========================================
 # CONFIGURACION VISUAL PRO (Red Team Theme)
@@ -257,7 +323,7 @@ class RedTeamApp(tk.Tk):
         self.main_frame.pack(fill='both', expand=True)
 
         self.back_btn = None
-        self.show_inicio_menu()
+        self.mostrar_splash_screen()
 
     # ---------------- helpers de navegación ----------------
     def limpiar_main_frame(self):
@@ -363,6 +429,66 @@ class RedTeamApp(tk.Tk):
             except Exception as e:
                 self.escribir_consola(f"\n[!] ERROR: {e}")
         threading.Thread(target=run, daemon=True).start()
+
+
+
+
+    # ==========================================
+    # PANTALLA DE CARGA (SPLASH SCREEN)
+    # ==========================================
+    def mostrar_splash_screen(self):
+        self.limpiar_main_frame()
+        
+        # Frame del splash
+        self.splash_frame = ttk.Frame(self.main_frame, style='Dark.TFrame')
+        self.splash_frame.pack(fill='both', expand=True)
+
+        # Configuramos fuente muy pequeña y wrap='none' para que no rompa el diseño en 320x240
+        self.splash_text = tk.Text(self.splash_frame, bg=COLOR_FONDO_PRINCIPAL, fg=COLOR_TEXTO_TERMINAL,
+                                   font=('Courier', 2), relief='flat', highlightthickness=0, wrap='none')
+        self.splash_text.pack(fill='both', expand=True, padx=2, pady=2)
+
+        # Variables de control para la animación
+        self.ruido_chars = ["░", "▒", "▓", "█", "#", "@", "%", "*"]
+        self.frames_totales = 18  # Duración de la animación
+        self.frame_actual = 0
+
+        self._animar_splash()
+
+    def _animar_splash(self):
+        if self.frame_actual > self.frames_totales:
+            # Termina la animación, pausa corta de 1 segundo y carga el menú
+            self.after(1000, self.show_inicio_menu)
+            return
+
+        # Nivel de ruido va de 1.0 (máximo ruido) a 0.0 (nítido)
+        nivel_ruido = 1.0 - (self.frame_actual / self.frames_totales)
+        texto_borroso = ""
+
+        # Generador de fotogramas
+        for char in ARTE_DRAGON:
+            if char not in (" ", "\n"):
+                if random.random() < nivel_ruido:
+                    texto_borroso += random.choice(self.ruido_chars)
+                else:
+                    texto_borroso += char
+            else:
+                texto_borroso += char
+
+        # Actualizar la pantalla de manera segura
+        self.splash_text.config(state='normal')
+        self.splash_text.delete('1.0', tk.END)
+        self.splash_text.insert(tk.END, texto_borroso)
+        
+        # Centramos el contenido dentro del text widget
+        self.splash_text.tag_add("center", "1.0", "end")
+        self.splash_text.tag_configure("center", justify="center")
+        
+        self.splash_text.config(state='disabled')
+
+        self.frame_actual += 1
+        # 100 milisegundos de delay por cada iteración
+        self.after(100, self._animar_splash)    
 
     # ---------------- INICIO ----------------
     def show_inicio_menu(self):
