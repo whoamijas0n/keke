@@ -1690,44 +1690,38 @@ if __name__ == "__main__":
         rclocal = "/etc/rc.local"
         modules_file = "/etc/modules"
         gadget_script = "/usr/local/bin/usb_gadget.sh"
+        
+        # Pre-procesamos la ruta para que sed no colapse con las barras
+        gs_escaped = gadget_script.replace('/', '\\/')
 
-        # 1. Liberar el gadget en caliente si está activo para evitar bloqueos
+        # 1. Liberar el gadget en caliente si está activo
         self.escribir_consola("[*] Liberando controlador USB...")
         subprocess.run("sudo sh -c 'echo \"\" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null'", shell=True)
 
         if modo == "host":
             # ==========================================
-            # MODO HOST (ANTENA/TECLADO): Comentar 
+            # MODO HOST (ANTENA/TECLADO)
             # ==========================================
-            
-            # config.txt: Comentar cualquier línea que empiece con dtoverlay=dwc2
             cmd_cfg = f"sudo sed -i 's/^dtoverlay=dwc2/#dtoverlay=dwc2/g' {cfg}"
             
-            # rc.local: Comentar el script de Rubber Ducky
-            cmd_rc = f"sudo sed -i 's|^.*{gadget_script.replace('/', '\\/')}.*$|# {gadget_script.replace('/', '\\/')} \&|' {rclocal}"
-            
-            # modules: Comentar dwc2, libcomposite y usb_f_hid
+            # Usamos \\& para solucionar el SyntaxWarning de Python
+            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|# {gs_escaped} \\&|' {rclocal}"
             cmd_mod = f"sudo sed -i 's/^dwc2/#dwc2/g; s/^libcomposite/#libcomposite/g; s/^usb_f_hid/#usb_f_hid/g' {modules_file}"
             
             self.escribir_consola("[*] Forzando Host nativo (dwc_otg)...")
 
         else:
             # ==========================================
-            # MODO GADGET (RUBBER DUCKY): Descomentar 
+            # MODO GADGET (RUBBER DUCKY)
             # ==========================================
-            
-            # config.txt: Borrar cualquier dwc2 previo e inyectar la línea exacta para peripheral
             cmd_cfg = f"sudo sed -i '/dwc2/d' {cfg} && sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=peripheral\" >> {cfg}'"
             
-            # rc.local: Descomentar el script (dejándolo listo para ejecutarse en 2do plano)
-            cmd_rc = f"sudo sed -i 's|^.*{gadget_script.replace('/', '\\/')}.*$|{gadget_script.replace('/', '\\/')} \&|' {rclocal}"
-            
-            # modules: Quitar cualquier '#' al inicio de dwc2, libcomposite y usb_f_hid
+            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|{gs_escaped} \\&|' {rclocal}"
             cmd_mod = f"sudo sed -i 's/^#*dwc2/dwc2/g; s/^#*libcomposite/libcomposite/g; s/^#*usb_f_hid/usb_f_hid/g' {modules_file}"
             
             self.escribir_consola("[*] Activando módulos de Ducky...")
 
-        # 2. Ejecutar las modificaciones con sed
+        # 2. Ejecutar las modificaciones
         subprocess.run(cmd_cfg, shell=True)
         subprocess.run(cmd_rc, shell=True)
         subprocess.run(cmd_mod, shell=True)
@@ -1735,7 +1729,7 @@ if __name__ == "__main__":
         self.escribir_consola("[+] Archivos de configuración actualizados.")
         self.escribir_consola("[!] Reiniciando en 3 segundos...")
 
-        # 3. Reiniciar para cargar los nuevos módulos del kernel
+        # 3. Reiniciar
         self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
 
     # ==========================================
