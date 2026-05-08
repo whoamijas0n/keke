@@ -1688,37 +1688,41 @@ if __name__ == "__main__":
 
         cfg = "/boot/config.txt"
         rclocal = "/etc/rc.local"
+        modules_file = "/etc/modules"
         gadget_script = "/usr/local/bin/usb_gadget.sh"
 
-        # 1. Liberar el gadget de manera segura (ignoramos errores si no existe)
+        # 1. Liberar el gadget en caliente si está activo
         self.escribir_consola("[*] Liberando controlador USB...")
         subprocess.run("sudo sh -c 'echo \"\" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null'", shell=True)
 
-        # 2. Preparar los comandos según el modo
+        # 2. Configurar expresiones según el modo
         if modo == "host":
             nuevo_overlay = "dtoverlay=dwc2,dr_mode=host"
-            # Reemplaza cualquier línea que contenga el script por su versión comentada
+            # Comentar rc.local
             cmd_rc = f"sudo sed -i 's|^.*{gadget_script.replace('/', '\\/')}.*$|# {gadget_script.replace('/', '\\/')} \&|' {rclocal}"
+            # Comentar libcomposite y usb_f_hid en /etc/modules
+            cmd_mod = f"sudo sed -i 's|^libcomposite|#libcomposite|g; s|^usb_f_hid|#usb_f_hid|g' {modules_file}"
         else:
             nuevo_overlay = "dtoverlay=dwc2,dr_mode=peripheral"
-            # Reemplaza cualquier línea que contenga el script por su versión DEScomentada
+            # Descomentar rc.local
             cmd_rc = f"sudo sed -i 's|^.*{gadget_script.replace('/', '\\/')}.*$|{gadget_script.replace('/', '\\/')} \&|' {rclocal}"
+            # Descomentar libcomposite y usb_f_hid en /etc/modules
+            cmd_mod = f"sudo sed -i 's|^#libcomposite|libcomposite|g; s|^#usb_f_hid|usb_f_hid|g' {modules_file}"
 
         # 3. Modificar /boot/config.txt
-        # Elimina cualquier configuración dwc2 previa para evitar conflictos
         subprocess.run(f"sudo sed -i '/^dtoverlay=dwc2/d' {cfg}", shell=True)
-        # Añade la nueva configuración al final del archivo
         subprocess.run(f"sudo sh -c 'echo \"{nuevo_overlay}\" >> {cfg}'", shell=True)
         self.escribir_consola(f"[*] Aplicando overlay: {nuevo_overlay}")
 
-        # 4. Modificar /etc/rc.local
+        # 4. Modificar archivos de sistema (rc.local y modules)
         subprocess.run(cmd_rc, shell=True)
-        self.escribir_consola("[*] Ajustando /etc/rc.local...")
+        subprocess.run(cmd_mod, shell=True)
+        self.escribir_consola("[*] Ajustando rc.local y módulos base...")
 
         self.escribir_consola("[+] Perfil aplicado con éxito.")
         self.escribir_consola("[!] Reiniciando sistema en 3 segundos...")
 
-        # 5. Reiniciar (Dejar que el Kernel haga el trabajo duro de cargar/descargar módulos en el boot)
+        # 5. Reiniciar
         self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
 
     # ==========================================
