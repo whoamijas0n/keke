@@ -108,7 +108,7 @@ class ScrollableFrame(tk.Frame):
         self.canvas = tk.Canvas(self, bg=self.bg_color, highlightthickness=0, borderwidth=0)
         self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview,
                                        bg="#333333", troughcolor="#1a1a1a",
-                                       activebackground=COLOR_BOTON_ROJO, width=24)
+                                       activebackground=COLOR_BOTON_ROJO, width=28)
         self.scrollable_frame = tk.Frame(self.canvas, bg=self.bg_color,
                                           highlightthickness=0, borderwidth=0)
 
@@ -197,6 +197,67 @@ class ScrollableFrame(tk.Frame):
             return
         widget.pack(**pack_options)
 
+
+class TecladoNumerico(tk.Toplevel):
+    def __init__(self, parent, variable_destino, titulo="Ingresar IP/Rango"):
+        super().__init__(parent)
+        self.variable_destino = variable_destino
+        
+        # Configuración de la ventana para que parezca un modal integrado
+        self.geometry("320x240")
+        self.title(titulo)
+        self.configure(bg=COLOR_FONDO_PRINCIPAL)
+        self.attributes('-topmost', True) # Se mantiene arriba del modo Kiosco
+        self.overrideredirect(True) # Sin barra de título del OS
+        
+        # Centrar respecto a la ventana principal
+        x = parent.winfo_x()
+        y = parent.winfo_y()
+        self.geometry(f"+{x}+{y}")
+
+        # Frame principal
+        main_frame = ttk.Frame(self, style='Dark.TFrame')
+        main_frame.pack(fill='both', expand=True, padx=5, pady=5)
+
+        # Pantalla (Display) del teclado
+        self.display_var = tk.StringVar(value=variable_destino.get())
+        display = ttk.Entry(main_frame, textvariable=self.display_var, font=('Helvetica', 14, 'bold'), 
+                            justify='center', style='Dark.TEntry')
+        display.pack(fill='x', pady=(0, 5))
+
+        # Contenedor de botones
+        grid_frame = ttk.Frame(main_frame, style='Dark.TFrame')
+        grid_frame.pack(fill='both', expand=True)
+
+        # Configurar proporciones del grid
+        for i in range(4):
+            grid_frame.grid_columnconfigure(i, weight=1)
+            grid_frame.grid_rowconfigure(i, weight=1)
+
+        botones = [
+            ('7', 0, 0), ('8', 0, 1), ('9', 0, 2), ('DEL', 0, 3),
+            ('4', 1, 0), ('5', 1, 1), ('6', 1, 2), ('/', 1, 3),
+            ('1', 2, 0), ('2', 2, 1), ('3', 2, 2), ('.', 2, 3),
+            ('0', 3, 0), ('-', 3, 1), ('CANCEL', 3, 2), ('OK', 3, 3)
+        ]
+
+        for (texto, fila, col) in botones:
+            estilo = 'Red.TButton' if texto in ('OK', 'CANCEL', 'DEL') else 'Gray.TButton'
+            btn = ttk.Button(grid_frame, text=texto, style=estilo, 
+                             command=lambda t=texto: self._procesar_tecla(t))
+            btn.grid(row=fila, column=col, sticky='nsew', padx=2, pady=2)
+
+    def _procesar_tecla(self, tecla):
+        actual = self.display_var.get()
+        if tecla == 'OK':
+            self.variable_destino.set(actual)
+            self.destroy()
+        elif tecla == 'CANCEL':
+            self.destroy()
+        elif tecla == 'DEL':
+            self.display_var.set(actual[:-1])
+        else:
+            self.display_var.set(actual + tecla)
 
 class RedTeamApp(tk.Tk):
     def __init__(self):
@@ -532,6 +593,8 @@ class RedTeamApp(tk.Tk):
         ttk.Label(config_frame, text="IP:", style='Dark.TLabel').grid(row=0, column=0, padx=1, pady=1)
         entry_target = ttk.Entry(config_frame, textvariable=self.target_ip, width=16, style='Dark.TEntry')
         entry_target.grid(row=0, column=1, padx=1, pady=1)
+        entry_target.bind("<Button-1>", lambda e: TecladoNumerico(self, self.target_ip))
+
 
         ttk.Button(config_frame, text="Set", style='Red.TButton', width=6,
                    command=lambda: self.escribir_consola(f"[+] Target: {self.obtener_target() or 'Inválido'}")).grid(row=0, column=2, padx=1, pady=1)
@@ -1618,8 +1681,56 @@ if __name__ == "__main__":
                 self.escribir_consola("[+] Hecho.")
             except Exception as e:
                 self.escribir_consola(f"[!] Error: {e}")
-
         threading.Thread(target=run, daemon=True).start()
+
+    def _cambiar_modo_usb(self, modo):
+        self.escribir_consola(f"[*] Preparando perfil USB: {modo.upper()}...")
+
+        cfg = "/boot/config.txt"
+        rclocal = "/etc/rc.local"
+        modules_file = "/etc/modules"
+        gadget_script = "/usr/local/bin/usb_gadget.sh"
+        
+        # Pre-procesamos la ruta para que sed no colapse con las barras
+        gs_escaped = gadget_script.replace('/', '\\/')
+
+        # 1. Liberar el gadget en caliente si está activo
+        self.escribir_consola("[*] Liberando controlador USB...")
+        subprocess.run("sudo sh -c 'echo \"\" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null'", shell=True)
+
+        if modo == "host":
+            # ==========================================
+            # MODO HOST (ANTENA/TECLADO)
+            # ==========================================
+            cmd_cfg = f"sudo sed -i 's/^dtoverlay=dwc2/#dtoverlay=dwc2/g' {cfg}"
+            
+            # Usamos \\& para solucionar el SyntaxWarning de Python
+            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|# {gs_escaped} \\&|' {rclocal}"
+            cmd_mod = f"sudo sed -i 's/^dwc2/#dwc2/g; s/^libcomposite/#libcomposite/g; s/^usb_f_hid/#usb_f_hid/g' {modules_file}"
+            
+            self.escribir_consola("[*] Forzando Host nativo (dwc_otg)...")
+
+        else:
+            # ==========================================
+            # MODO GADGET (RUBBER DUCKY)
+            # ==========================================
+            cmd_cfg = f"sudo sed -i '/dwc2/d' {cfg} && sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=peripheral\" >> {cfg}'"
+            
+            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|{gs_escaped} \\&|' {rclocal}"
+            cmd_mod = f"sudo sed -i 's/^#*dwc2/dwc2/g; s/^#*libcomposite/libcomposite/g; s/^#*usb_f_hid/usb_f_hid/g' {modules_file}"
+            
+            self.escribir_consola("[*] Activando módulos de Ducky...")
+
+        # 2. Ejecutar las modificaciones
+        subprocess.run(cmd_cfg, shell=True)
+        subprocess.run(cmd_rc, shell=True)
+        subprocess.run(cmd_mod, shell=True)
+
+        self.escribir_consola("[+] Archivos de configuración actualizados.")
+        self.escribir_consola("[!] Reiniciando en 3 segundos...")
+
+        # 3. Reiniciar
+        self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
 
     # ==========================================
     # MENÚ UTILIDADES 
@@ -1634,6 +1745,8 @@ if __name__ == "__main__":
         scroll_utils.pack(fill='both', expand=True, padx=2, pady=2)
 
         opciones = [
+            ("Activar Perfil: ANTENA WIFI", lambda: self._cambiar_modo_usb("host")),
+            ("Activar Perfil: RUBBER DUCKY", lambda: self._cambiar_modo_usb("gadget")),
             ("Conectar a Red WiFi", self._utils_wifi_seleccionar_interfaz),
             ("Estado de Red WiFi", self._utils_wifi_estado),
             ("Conectar Dispositivo BT", self._utils_bluetooth_seleccionar_interfaz),
