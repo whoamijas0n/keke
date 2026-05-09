@@ -1686,33 +1686,50 @@ if __name__ == "__main__":
     def _cambiar_modo_usb(self, modo):
         self.escribir_consola(f"[*] Preparando perfil USB: {modo.upper()}...")
 
-        cfg = "/boot/config.txt"
+        # 1. Detectar la ruta correcta de config.txt (depende de la versión de RaspiOS)
+        cfg = "/boot/firmware/config.txt" if os.path.exists("/boot/firmware/config.txt") else "/boot/config.txt"
         gadget_script = "/usr/local/bin/usb_gadget.sh"
+        service_path = "/etc/systemd/system/usb_gadget.service"
 
-        # 1. Limpiamos cualquier rastro de dwc2 del config.txt
-        subprocess.run(f"sudo sed -i '/dwc2/d' {cfg}", shell=True)
+        # 2. Crear el servicio systemd si no existe para ejecutar el script al inicio
+        if not os.path.exists(service_path):
+            self.escribir_consola("[*] Creando servicio systemd para el gadget...")
+            servicio_systemd = """[Unit]
+Description=USB HID Gadget Initialization
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/bin/usb_gadget.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+"""
+            subprocess.run(f"sudo sh -c 'echo \"{servicio_systemd}\" > {service_path}'", shell=True)
+            subprocess.run("sudo systemctl daemon-reload", shell=True)
+            subprocess.run(f"sudo chmod +x {gadget_script}", shell=True)
+
+        # 3. Limpiar cualquier configuración previa de dwc2
+        subprocess.run(f"sudo sed -i '/dtoverlay=dwc2/d' {cfg}", shell=True)
 
         if modo == "host":
             # ==========================================
-            # MODO HOST (ANTENA WIFI / TECLADO)
+            # MODO HOST (ANTENA WIFI / TECLADO / ADAPTADORES)
             # ==========================================
-            # Sin dtoverlay=dwc2, la placa usa el controlador Host nativo.
-            # Solo nos aseguramos de que el script del Ducky NO se ejecute al inicio.
-            
-            # Quitamos el permiso de ejecución al script del gadget (apagado por hardware)
-            subprocess.run(f"sudo chmod -x {gadget_script} 2>/dev/null", shell=True)
+            # Forzamos el modo host y desactivamos el script del gadget
+            subprocess.run(f"sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=host\" >> {cfg}'", shell=True)
+            subprocess.run("sudo systemctl disable usb_gadget.service", shell=True, stderr=subprocess.DEVNULL)
             self.escribir_consola("[*] Controlador configurado como Host puro.")
 
         else:
             # ==========================================
             # MODO GADGET (RUBBER DUCKY)
             # ==========================================
-            # Inyectamos dwc2 en modo periférico
+            # Forzamos modo periférico y habilitamos el servicio para que arranque con el sistema
             subprocess.run(f"sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=peripheral\" >> {cfg}'", shell=True)
-            
-            # Le damos permiso de ejecución al script y lo ejecutamos mediante un servicio cron o rc.local limpio
-            subprocess.run(f"sudo chmod +x {gadget_script}", shell=True)
-            self.escribir_consola("[*] Módulos Gadget armados.")
+            subprocess.run("sudo systemctl enable usb_gadget.service", shell=True, stderr=subprocess.DEVNULL)
+            self.escribir_consola("[*] Módulos Gadget armados y servicio activado.")
 
         self.escribir_consola("[+] Aplicado. Reiniciando en 3 segundos...")
         self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
