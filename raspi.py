@@ -1686,50 +1686,52 @@ if __name__ == "__main__":
     def _cambiar_modo_usb(self, modo):
         self.escribir_consola(f"[*] Preparando perfil USB: {modo.upper()}...")
 
-        cfg = "/boot/config.txt"
-        rclocal = "/etc/rc.local"
-        modules_file = "/etc/modules"
+        # 1. Detectar la ruta correcta de config.txt (depende de la versión de RaspiOS)
+        cfg = "/boot/firmware/config.txt" if os.path.exists("/boot/firmware/config.txt") else "/boot/config.txt"
         gadget_script = "/usr/local/bin/usb_gadget.sh"
-        
-        # Pre-procesamos la ruta para que sed no colapse con las barras
-        gs_escaped = gadget_script.replace('/', '\\/')
+        service_path = "/etc/systemd/system/usb_gadget.service"
 
-        # 1. Liberar el gadget en caliente si está activo
-        self.escribir_consola("[*] Liberando controlador USB...")
-        subprocess.run("sudo sh -c 'echo \"\" > /sys/kernel/config/usb_gadget/g1/UDC 2>/dev/null'", shell=True)
+        # 2. Crear el servicio systemd si no existe para ejecutar el script al inicio
+        if not os.path.exists(service_path):
+            self.escribir_consola("[*] Creando servicio systemd para el gadget...")
+            servicio_systemd = """[Unit]
+Description=USB HID Gadget Initialization
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/bin/usb_gadget.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+"""
+            subprocess.run(f"sudo sh -c 'echo \"{servicio_systemd}\" > {service_path}'", shell=True)
+            subprocess.run("sudo systemctl daemon-reload", shell=True)
+            subprocess.run(f"sudo chmod +x {gadget_script}", shell=True)
+
+        # 3. Limpiar cualquier configuración previa de dwc2
+        subprocess.run(f"sudo sed -i '/dtoverlay=dwc2/d' {cfg}", shell=True)
 
         if modo == "host":
             # ==========================================
-            # MODO HOST (ANTENA/TECLADO)
+            # MODO HOST (ANTENA WIFI / TECLADO / ADAPTADORES)
             # ==========================================
-            cmd_cfg = f"sudo sed -i 's/^dtoverlay=dwc2/#dtoverlay=dwc2/g' {cfg}"
-            
-            # Usamos \\& para solucionar el SyntaxWarning de Python
-            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|# {gs_escaped} \\&|' {rclocal}"
-            cmd_mod = f"sudo sed -i 's/^dwc2/#dwc2/g; s/^libcomposite/#libcomposite/g; s/^usb_f_hid/#usb_f_hid/g' {modules_file}"
-            
-            self.escribir_consola("[*] Forzando Host nativo (dwc_otg)...")
+            # Forzamos el modo host y desactivamos el script del gadget
+            subprocess.run(f"sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=host\" >> {cfg}'", shell=True)
+            subprocess.run("sudo systemctl disable usb_gadget.service", shell=True, stderr=subprocess.DEVNULL)
+            self.escribir_consola("[*] Controlador configurado como Host puro.")
 
         else:
             # ==========================================
             # MODO GADGET (RUBBER DUCKY)
             # ==========================================
-            cmd_cfg = f"sudo sed -i '/dwc2/d' {cfg} && sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=peripheral\" >> {cfg}'"
-            
-            cmd_rc = f"sudo sed -i 's|^.*{gs_escaped}.*$|{gs_escaped} \\&|' {rclocal}"
-            cmd_mod = f"sudo sed -i 's/^#*dwc2/dwc2/g; s/^#*libcomposite/libcomposite/g; s/^#*usb_f_hid/usb_f_hid/g' {modules_file}"
-            
-            self.escribir_consola("[*] Activando módulos de Ducky...")
+            # Forzamos modo periférico y habilitamos el servicio para que arranque con el sistema
+            subprocess.run(f"sudo sh -c 'echo \"dtoverlay=dwc2,dr_mode=peripheral\" >> {cfg}'", shell=True)
+            subprocess.run("sudo systemctl enable usb_gadget.service", shell=True, stderr=subprocess.DEVNULL)
+            self.escribir_consola("[*] Módulos Gadget armados y servicio activado.")
 
-        # 2. Ejecutar las modificaciones
-        subprocess.run(cmd_cfg, shell=True)
-        subprocess.run(cmd_rc, shell=True)
-        subprocess.run(cmd_mod, shell=True)
-
-        self.escribir_consola("[+] Archivos de configuración actualizados.")
-        self.escribir_consola("[!] Reiniciando en 3 segundos...")
-
-        # 3. Reiniciar
+        self.escribir_consola("[+] Aplicado. Reiniciando en 3 segundos...")
         self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
 
     # ==========================================
