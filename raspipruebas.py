@@ -106,9 +106,11 @@ class ScrollableFrame(tk.Frame):
 
         # Canvas con scrollbar
         self.canvas = tk.Canvas(self, bg=self.bg_color, highlightthickness=0, borderwidth=0)
-        self.scrollbar = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview,
-                                       bg="#333333", troughcolor="#1a1a1a",
-                                       activebackground=COLOR_BOTON_ROJO, width=28)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview,
+                                       style='Dark.Vertical.TScrollbar')
+       
+       
+       
         self.scrollable_frame = tk.Frame(self.canvas, bg=self.bg_color,
                                           highlightthickness=0, borderwidth=0)
 
@@ -294,6 +296,20 @@ class RedTeamApp(tk.Tk):
         style.map('Dark.TMenubutton',
                 background=[('active', COLOR_BOTON_HOVER)],
                 arrowcolor=[('active', 'white')])
+
+        # --- NUEVO: Estilo para la barra de desplazamiento (Scrollbar) táctil ---
+        style.configure('Dark.Vertical.TScrollbar',
+                        background='#333333',
+                        troughcolor=COLOR_FONDO_PRINCIPAL,
+                        bordercolor=COLOR_FONDO_PRINCIPAL,
+                        arrowcolor='white',
+                        arrowsize=20,  # Aumenta el grosor para mantenerlo "touch-friendly"
+                        relief='flat')
+        style.map('Dark.Vertical.TScrollbar',
+                  background=[('active', COLOR_BOTON_ROJO), ('pressed', COLOR_BOTON_HOVER)],
+                  arrowcolor=[('active', 'white')])
+        
+
 
         style.configure('Red.TButton', background=COLOR_BOTON_ROJO, foreground='white',
                         relief='flat', font=('Helvetica', 10, 'bold'),
