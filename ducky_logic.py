@@ -36,6 +36,21 @@ HID_KEY_CODES = {
     'rightctrl': 0xe4, 'rightshift': 0xe5, 'rightalt': 0xe6, 'rightgui': 0xe7,
 }
 
+# Añade este diccionario debajo de tus HID_KEY_CODES
+SHIFT_CHARS = {
+    ':': ';',  # En teclado US, ':' es Shift + ';'
+    '?': '/',  # En teclado US, '?' es Shift + '/'
+    '_': '-',
+    '+': '=',
+    '"': "'",
+    '>': '.',
+    '<': ',',
+    '|': '\\',
+    '{': '[',
+    '}': ']',
+    '~': '`'
+}
+
 # Alias comunes
 ALIAS = {
     'gui': 'leftgui', 'windows': 'leftgui', 'win': 'leftgui',
@@ -58,16 +73,15 @@ ALIAS = {
 HID_DEVICE = "/dev/hidg0"
 
 def enviar_reporte_hid(modificador, tecla):
-    """
-    Envía un reporte HID de teclado de 8 bytes.
-    Byte 0: modificador (bitmask)
-    Byte 1: reservado (0)
-    Bytes 2-7: códigos de teclas presionadas (hasta 6)
-    """
+    """Envía un reporte HID de teclado de 8 bytes."""
     reporte = bytes([modificador, 0, tecla, 0, 0, 0, 0, 0])
     try:
         with open(HID_DEVICE, 'wb') as fd:
             fd.write(reporte)
+            
+            # DELAY CRÍTICO: Da tiempo al host para hacer el polling USB
+            time.sleep(0.015) 
+            
             # Enviar reporte vacío para liberar tecla
             fd.write(b'\x00' * 8)
     except Exception as e:
@@ -109,21 +123,26 @@ def presionar_combinacion(modificador, tecla):
     key_code = HID_KEY_CODES[tecla_str]
     enviar_reporte_hid(mod_bit, key_code)
 
+
 def escribir_texto(texto):
     """Escribe una cadena de texto carácter por carácter."""
     for char in texto:
-        # Manejar caracteres especiales como mayúsculas
         if char.isupper():
-            # Presionar shift + char.lower()
             mod_bit = 1 << (HID_KEY_CODES['leftshift'] - 0xE0)
             key_lower = char.lower()
             if key_lower in HID_KEY_CODES:
                 enviar_reporte_hid(mod_bit, HID_KEY_CODES[key_lower])
+        
+        # NUEVO BLOQUE: Manejo de caracteres especiales
+        elif char in SHIFT_CHARS:
+            mod_bit = 1 << (HID_KEY_CODES['leftshift'] - 0xE0)
+            base_char = SHIFT_CHARS[char]
+            enviar_reporte_hid(mod_bit, HID_KEY_CODES[base_char])
+            
         else:
             if char in HID_KEY_CODES:
                 enviar_reporte_hid(0, HID_KEY_CODES[char])
             else:
-                # Carácter no mapeado, se omite (puede mejorarse con mapeo extendido)
                 print(f"[!] Carácter no soportado: {char}")
 
 def ejecutar_script_ducky(ruta_archivo):
