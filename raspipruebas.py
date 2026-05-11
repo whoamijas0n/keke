@@ -1635,8 +1635,8 @@ WantedBy=sysinit.target
             subprocess.run("sudo systemctl enable usb_gadget.service", shell=True, stderr=subprocess.DEVNULL)
             self.escribir_consola("[*] Módulos Gadget armados y servicio activado.")
 
-        self.escribir_consola("[+] Aplicado. Reiniciando en 3 segundos...")
-        self.after(3000, lambda: subprocess.run("sudo reboot", shell=True))
+        self.escribir_consola("[+] Aplicado. Apagando en 3 segundos...")
+        self.after(3000, lambda: subprocess.run("sudo poweroff", shell=True))
 
     # ==========================================
     # MENÚ UTILIDADES 
