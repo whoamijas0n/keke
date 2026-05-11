@@ -615,7 +615,7 @@ class RedTeamApp(tk.Tk):
             ("1. Reconocimiento", self.show_recon_menu),
             ("2. MAC Changer", self.show_mac_menu),
             ("3. Auditoría WiFi", self.show_wifi_menu),
-            ("4. Bluetooth BLE", self.show_bluetooth_menu),
+            ("4. NRF24 Jammer", self.show_nrf_jammer_menu),
             ("5. Rubber Ducky", self.show_ducky_menu),
             ("6. Utilidades OS", self.show_utils_menu)
         ]
@@ -1498,196 +1498,51 @@ if __name__ == "__main__":
             self.gadget = BLEGadget()
             if self.gadget.is_available():
                 self.gadget_available = True
-                self.escribir_consola("[+] Gadget ESP32 BLE conectado.")
+                self.escribir_consola("[+] Gadget NRF24 Jammer conectado.")
             else:
                 self.gadget_available = False
-                self.escribir_consola("[!] Gadget ESP32 BLE no detectado.")
+                self.escribir_consola("[!] Gadget NRF24 Jammer no detectado.")
         except Exception as e:
             self.gadget = None
             self.gadget_available = False
             self.escribir_consola(f"[!] Error al inicializar gadget BLE: {e}")
 
-    def show_bluetooth_menu(self):
+    def show_nrf_jammer_menu(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_inicio_menu)
-        ttk.Label(self.main_frame, text="AUDITORÍA BLUETOOTH", style='Title.TLabel').pack(pady=2)
-
+        ttk.Label(self.main_frame, text="NRF24 JAMMER", style='Title.TLabel').pack(pady=2)
         self._init_gadget()
         
-        # Todo dentro del scroll
-        scroll_ble = ScrollableFrame(self.main_frame, max_items=20)
-        scroll_ble.pack(fill='both', expand=True, padx=2, pady=2)
+        scroll_nrf = ScrollableFrame(self.main_frame, max_items=10)
+        scroll_nrf.pack(fill='both', expand=True, padx=2, pady=2)
         
         gadget_status = "Conectado" if self.gadget_available else "Desconectado"
         status_color = "#00ff00" if self.gadget_available else "#ff4d4d"
-        ttk.Label(scroll_ble.scrollable_frame, text=f"Gadget: {gadget_status}",
-                  foreground=status_color, font=('Helvetica', 9)).pack(pady=2)
-
+        ttk.Label(scroll_nrf.scrollable_frame, text=f"Hardware: {gadget_status}",
+                  foreground=status_color, font=('Helvetica', 9)).pack(pady=(2, 10))
         if self.gadget_available:
-            opciones = [
-                ("Scan BLE (HSPI)", lambda: self._ble_scan_gadget(0)),
-                ("Scan BLE (VSPI)", lambda: self._ble_scan_gadget(1)),
-                ("Bluejacking", self._bluejacking_gui),
-                ("Beacon Flood", self._beacon_flood_gui),
-                ("Jammer", self._jammer_gui),
-                ("Barrido Jammer", self._sweep_jammer_gui),
-                ("Detener Gadget", self._gadget_stop_all),
-                ("Estado Gadget", self._gadget_status)
-            ]
+            scroll_nrf.add_button(text="Activar Jamming", command=self._nrf_start, style='Red.TButton', width=28)
+            scroll_nrf.add_button(text="Detener Jamming", command=self._nrf_stop, style='Danger.TButton', width=28)
+            scroll_nrf.add_button(text="Consultar Estado", command=self._nrf_status, style='Gray.TButton', width=28)
         else:
-            opciones = [("Scan Dispositivos BLE", self._ble_escanear)]
-
-        for text, cmd in opciones:
-            style_btn = 'Danger.TButton' if "Detener" in text else 'Red.TButton'
-            scroll_ble.add_button(text=text, command=cmd, style=style_btn, width=28)
-
-        ttk.Button(scroll_ble.scrollable_frame, text="Explorar Resultados", style='Gray.TButton',
-                   command=lambda: self._mostrar_explorador_generico(BASE_DIR_BLE, "RESULTADOS BLE",
-                                                                     self.show_bluetooth_menu)
-                   ).pack(fill='x', padx=10, pady=3)
-                   
-        self.mostrar_consola(parent=scroll_ble.scrollable_frame)
+            ttk.Label(scroll_nrf.scrollable_frame, text="Conecta el ESP32 por USB.", style='Dark.TLabel').pack(pady=5)
+            scroll_nrf.add_button(text="Reintentar Conexión", command=self.show_nrf_jammer_menu, style='Gray.TButton', width=28)
+        self.mostrar_consola(parent=scroll_nrf.scrollable_frame)
         gc.collect()
 
-    def _ble_scan_gadget(self, module):
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text=f"ESCANEANDO (MOD {module})...", style='Title.TLabel').pack(pady=5)
-        self.mostrar_consola()
-
-        def callback(devices):
-            self.after(0, lambda: self._ble_gadget_mostrar_dispositivos(devices, module))
-
-        self.gadget.scan(module, 10, callback)
-
-    def _ble_gadget_mostrar_dispositivos(self, dispositivos, module):
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text="DISPOSITIVOS (Gadget)", style='Title.TLabel').pack(pady=2)
-        if not dispositivos:
-            ttk.Label(self.main_frame, text="No se encontraron.", style='Dark.TLabel').pack()
-            return
-        scroll = ScrollableFrame(self.main_frame, max_items=50)
-        scroll.pack(fill='both', expand=True, padx=5, pady=2)
-        for dev in dispositivos:
-            texto = f"{dev['name'][:15]} ({dev['mac']})"
-            scroll.add_button(text=texto, command=lambda d=dev: self._ble_acciones(d),
-                              style='Gray.TButton', width=28)
-        self.mostrar_consola(parent=scroll.scrollable_frame)
-        gc.collect()
-
-    def _bluejacking_gui(self):
-        msg = simpledialog.askstring("Bluejacking", "Mensaje advertising:")
-        if msg:
-            self.gadget.advertise(0, msg)
-            self.limpiar_main_frame()
-            self.agregar_boton_atras(self.show_bluetooth_menu)
-            ttk.Label(self.main_frame, text="Publicidad activa.", style='Title.TLabel').pack(pady=5)
-            ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
-                       command=lambda: self.gadget.stop(0)).pack(pady=5)
-            self.mostrar_consola()
-
-    def _beacon_flood_gui(self):
-        count = simpledialog.askinteger("Flood", "Beacons:")
-        if not count: return
-        interval = simpledialog.askinteger("Flood", "Intervalo(ms):")
-        if not interval: return
-        self.gadget.beacon_flood(0, count, interval)
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text="Flood en curso...", style='Title.TLabel').pack(pady=5)
-        ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
-                   command=lambda: self.gadget.stop(0)).pack(pady=5)
-        self.mostrar_consola()
-
-    def _jammer_gui(self):
-        ch_str = simpledialog.askstring("Jammer", "Canal(0-78):")
-        if not ch_str: return
-        dur_str = simpledialog.askstring("Jammer", "Segundos:")
-        if not dur_str: return
-        self.gadget.jam(0, int(ch_str), int(dur_str))
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text=f"Jamming canal {ch_str}", style='Title.TLabel').pack(pady=5)
-        ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
-                   command=lambda: self.gadget.stop(0)).pack(pady=5)
-        self.mostrar_consola()
-
-    def _sweep_jammer_gui(self):
-        dur_str = simpledialog.askstring("Barrido", "Segundos:")
-        if not dur_str: return
-        self.gadget.sweep_jam(0, int(dur_str))
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text="Barrido activo", style='Title.TLabel').pack(pady=5)
-        ttk.Button(self.main_frame, text="Detener", style='Danger.TButton',
-                   command=lambda: self.gadget.stop(0)).pack(pady=5)
-        self.mostrar_consola()
-
-    def _gadget_stop_all(self):
-        self.gadget.stop(0)
-        self.gadget.stop(1)
-
-    def _gadget_status(self):
+    def _nrf_start(self):
         if self.gadget_available:
-            self.escribir_consola(f"[+] Estado gadget: {self.gadget.status()}")
+            self.escribir_consola("[*] Iniciando ataque RF (Barrido continuo)...")
+            self.gadget.sweep_jam(0, 0) # 0 duración = infinito hasta recibir stop
 
-    def _ble_escanear(self):
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text="ESCANEANDO BLE...", style='Title.TLabel').pack(pady=5)
-        self.mostrar_consola()
+    def _nrf_stop(self):
+        if self.gadget_available:
+            self.escribir_consola("[*] Deteniendo transmisiones...")
+            self.gadget.stop(0)
 
-        def escanear():
-            subprocess.run(["sudo", "hciconfig", "hci0", "up"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["sudo", "bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-            subprocess.run("sudo bluetoothctl scan on &", shell=True, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-            time.sleep(12)
-            subprocess.run(["sudo", "bluetoothctl", "scan", "off"], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-            dispositivos = []
-            try:
-                output = subprocess.check_output("sudo bluetoothctl devices", shell=True, text=True)
-                for line in output.splitlines():
-                    if "Device" in line:
-                        parts = line.strip().split(' ', 2)
-                        if len(parts) >= 3: dispositivos.append({"mac": parts[1], "nombre": parts[2]})
-            except:
-                pass
-            self.after(0, lambda: self._mostrar_dispositivos_ble(dispositivos))
-
-        threading.Thread(target=escanear, daemon=True).start()
-
-    def _mostrar_dispositivos_ble(self, dispositivos):
-        self.limpiar_main_frame()
-        self.agregar_boton_atras(self.show_bluetooth_menu)
-        ttk.Label(self.main_frame, text="DISPOSITIVOS BLE", style='Title.TLabel').pack(pady=2)
-        if not dispositivos:
-            ttk.Label(self.main_frame, text="No se encontraron.", style='Dark.TLabel').pack()
-            return
-        scroll = ScrollableFrame(self.main_frame, max_items=50)
-        scroll.pack(fill='both', expand=True, padx=5, pady=2)
-        for dev in dispositivos:
-            texto = f"{dev['nombre'][:15]} ({dev['mac']})"
-            scroll.add_button(text=texto, command=lambda d=dev: self._ble_conectar_legacy(d['mac']),
-                              style='Gray.TButton', width=28)
-        self.mostrar_consola(parent=scroll.scrollable_frame)
-        gc.collect()
-
-    def _ble_conectar_legacy(self, mac):
-        self.escribir_consola(f"[*] Conectando a {mac}...")
-
-        def conectar():
-            try:
-                subprocess.run(f"sudo bluetoothctl pair {mac}", shell=True, timeout=30)
-                subprocess.run(f"sudo bluetoothctl connect {mac}", shell=True, timeout=30)
-                self.escribir_consola(f"[+] Conectado a {mac}")
-            except Exception as e:
-                self.escribir_consola(f"[!] Error: {e}")
-
-        threading.Thread(target=conectar, daemon=True).start()
+    def _nrf_status(self):
+        if self.gadget_available:
+            self.escribir_consola(f"[+] Estado: {self.gadget.status()}")
 
     # ==========================================
     # MENÚ RUBBER DUCKY 
