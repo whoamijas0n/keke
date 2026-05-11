@@ -6,5 +6,5 @@ ENTER
 REM Esperamos 3 segundos a que Firefox abra la ventana y se enfoque
 DELAY 3000
 STRING https://www.youtube.com/watch?v=dQw4w9WgXcQ
-DELAY 500
+DELAY 1000
 ENTER
