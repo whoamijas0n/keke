@@ -2011,17 +2011,29 @@ WantedBy=sysinit.target
 
         def conectar():
             try:
-                pair = subprocess.run(f"sudo bluetoothctl -- pair {mac}", shell=True, capture_output=True, text=True,
-                                      timeout=30)
-                if "Pairing successful" in pair.stdout or "Paired: yes" in pair.stdout:
-                    connect = subprocess.run(f"sudo bluetoothctl -- connect {mac}", shell=True, capture_output=True,
-                                             text=True, timeout=30)
-                    estado = "ÉXITO" if "Connection successful" in connect.stdout or "Connected: yes" in connect.stdout else "ERROR"
+                # 1. BORRAR PERFIL PREVIO CORRUPTO: 
+                # Esto evita el bug "key-mgmt: property is missing" limpiando la caché de esa red.
+                subprocess.run(["nmcli", "connection", "delete", ssid], capture_output=True)
+                time.sleep(1) # Pequeña pausa para asegurar que NM elimine el perfil
+                
+                # 2. CONECTAR DE FORMA SEGURA:
+                # Usamos una lista y quitamos shell=True para evitar inyección de comandos 
+                # o errores con contraseñas que tengan caracteres especiales (!, $, ', ").
+                if password:
+                    cmd = ["nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", iface]
                 else:
-                    estado = "FALLO PAIR"
+                    cmd = ["nmcli", "device", "wifi", "connect", ssid, "ifname", iface]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    state_out = subprocess.check_output(["nmcli", "-t", "-f", "GENERAL.STATE", "dev", "show", iface], text=True)
+                    estado = "ÉXITO" if "100 (connected)" in state_out else "ADVERTENCIA"
+                else:
+                    estado = f"ERROR: {result.stderr.strip()}"
             except Exception as e:
                 estado = f"EXCEPCIÓN: {e}"
-            self.after(0, lambda: self._utils_bt_mostrar_resultado(estado))
+            self.after(0, lambda: self._utils_wifi_mostrar_resultado(estado, iface))
 
         threading.Thread(target=conectar, daemon=True).start()
 
