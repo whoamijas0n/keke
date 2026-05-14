@@ -3,8 +3,8 @@
 #include <ezButton.h>
 #include "esp_bt.h"
 #include "esp_wifi.h"
-
-// ========== PANTALLA OLED 0.96" (SDA=4, SCL=5) ==========
+#include "esp_task_wdt.h"
+// ── OLED ─────────────────────────────────────────────────
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -14,203 +14,217 @@
 #define SDA_PIN        4
 #define SCL_PIN        5
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-// =========================================================
+// ─────────────────────────────────────────────────────────
 
-SPIClass *sp = nullptr;
-SPIClass *hp = nullptr;
+SPIClass *sp = nullptr;   // VSPI → Core 0
+SPIClass *hp = nullptr;   // HSPI → Core 1
 
-RF24 radio(16, 15, 16000000);   // HSPI
-RF24 radio1(22, 21, 16000000);  // VSPI
+RF24 radio (22, 21, 16000000);   // VSPI  — Core 0
+RF24 radio1(16, 15, 16000000);   // HSPI  — Core 1
 
-unsigned int flag = 0;   // HSPI
-unsigned int flagv = 0;  // VSPI
-int ch = 45;
-int ch1 = 45;
+// ── Estado de barrido — VSPI (Core 0) ────────────────────
+static volatile byte ch0   = 45;
+static volatile byte flag0 = 0;
 
+// ── Estado de barrido — HSPI (Core 1) ────────────────────
+static byte ch1   = 60;
+static byte flag1 = 0;
+
+// ── Control ───────────────────────────────────────────────
 ezButton toggleSwitch(33);
 
-// ========== VARIABLES DE CONTROL (sin cambios) ==========
-bool jamming_enabled = false;
-unsigned long stop_time = 0;
-bool has_duration = false;
+volatile bool jamming_enabled = false; // leído por ambos cores
+unsigned long stop_time       = 0;
+bool          has_duration    = false;
+String        serial_buffer   = "";
 
-// Buffer para comandos serie
-String serial_buffer = "";
+TaskHandle_t jammingTaskHandle = NULL;
 
-// ========== VARIABLES EXCLUSIVAS DE OLED ==========
-static bool  oled_blink      = false;
+// ── OLED ──────────────────────────────────────────────────
+static bool          oled_blink       = false;
 static unsigned long oled_last_blink  = 0;
 static unsigned long oled_last_update = 0;
-// =====================================================
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  DIBUJAR ÍCONO BLUETOOTH (símbolo clásico ᛒ)
-//  Parámetros: cx/cy = centro, h = semialtura, w = semianchura
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════
+//  OLED
+// ═════════════════════════════════════════════════════════
 void drawBTIcon(int cx, int cy, int h, int w) {
-  int h3 = h / 3;          // un tercio de la altura
-  // Línea vertical principal (doble para grosor)
-  display.drawLine(cx,   cy - h, cx,   cy + h, WHITE);
-  display.drawLine(cx+1, cy - h, cx+1, cy + h, WHITE);
-
-  // Brazo superior derecho: cima → vértice derecho
-  display.drawLine(cx,   cy - h,  cx + w, cy - h3, WHITE);
-  // Regreso al centro
-  display.drawLine(cx + w, cy - h3, cx,   cy,      WHITE);
-
-  // Brazo inferior derecho: centro → vértice derecho
-  display.drawLine(cx,   cy,       cx + w, cy + h3, WHITE);
-  // Regreso al fondo
-  display.drawLine(cx + w, cy + h3, cx,   cy + h,   WHITE);
+  int h3 = h / 3;
+  display.drawLine(cx,     cy - h,  cx,     cy + h,   WHITE);
+  display.drawLine(cx + 1, cy - h,  cx + 1, cy + h,   WHITE);
+  display.drawLine(cx,     cy - h,  cx + w, cy - h3,  WHITE);
+  display.drawLine(cx + w, cy - h3, cx,     cy,        WHITE);
+  display.drawLine(cx,     cy,      cx + w, cy + h3,  WHITE);
+  display.drawLine(cx + w, cy + h3, cx,     cy + h,   WHITE);
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  ACTUALIZAR PANTALLA OLED
-//  Se llama desde loop() cada ~200 ms. NO toca ninguna variable de radio.
-// ─────────────────────────────────────────────────────────────────────────────
 void updateOLED() {
-  // — Parpadeo del indicador de estado cada 500 ms —
   if (millis() - oled_last_blink > 500) {
     oled_blink = !oled_blink;
     oled_last_blink = millis();
   }
-
   display.clearDisplay();
-
-  // ── Marco exterior redondeado ──────────────────────────────────────────────
   display.drawRoundRect(0, 0, 128, 64, 4, WHITE);
-
-  // ── Panel izquierdo: ícono Bluetooth ──────────────────────────────────────
-  // Círculo de fondo del ícono
   display.drawCircle(24, 32, 21, WHITE);
-
-  // Ícono BT centrado en (24, 32)
   drawBTIcon(24, 32, 15, 10);
-
-  // ── Divisor vertical ──────────────────────────────────────────────────────
   display.drawLine(49, 4, 49, 59, WHITE);
-
-  // ── Panel derecho: título ─────────────────────────────────────────────────
-  //   "Blue" en tamaño 2  (48 × 16 px)
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-  display.setCursor(55, 5);
-  display.print("Blue");
-
-  //   "-Fly" en tamaño 2 justo debajo
-  display.setCursor(55, 22);
-  display.print("-Fly");
-
-  // Línea separadora bajo el título
+  display.setTextSize(2); display.setTextColor(WHITE);
+  display.setCursor(55, 5);  display.print("Blue");
+  display.setCursor(55, 22); display.print("-Fly");
   display.drawLine(52, 41, 124, 41, WHITE);
-
-  // ── Subtítulo: estado ─────────────────────────────────────────────────────
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-
+  display.setTextSize(1); display.setTextColor(WHITE);
   if (jamming_enabled) {
-    // Indicador circular parpadeante (activo)
-    if (oled_blink) {
-      display.fillCircle(57, 53, 3, WHITE);
-    } else {
-      display.drawCircle(57, 53, 3, WHITE);
-    }
-    display.setCursor(64, 49);
-    display.print("Iniciado");
+    if (oled_blink) display.fillCircle(57, 53, 3, WHITE);
+    else            display.drawCircle(57, 53, 3, WHITE);
+    display.setCursor(64, 49); display.print("Iniciado");
   } else {
-    // Indicador circular fijo (inactivo)
     display.drawCircle(57, 53, 3, WHITE);
-    display.setCursor(64, 49);
-    display.print("Detenido");
+    display.setCursor(64, 49); display.print("Detenido");
   }
-
   display.display();
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  FUNCIONES ORIGINALES — SIN MODIFICACIONES
-// ─────────────────────────────────────────────────────────────────────────────
-void two() {
-  if (flagv == 0) {
-    ch1 += 4;
-  } else {
-    ch1 -= 4;
+// ═════════════════════════════════════════════════════════
+//  CONFIGURACIÓN DE RADIO
+// ═════════════════════════════════════════════════════════
+void configureRadio(RF24 &r) {
+  r.setAutoAck(false);
+  r.stopListening();
+  r.setRetries(0, 0);
+  r.setPayloadSize(5);     
+  r.setAddressWidth(3);         
+  r.setPALevel(RF24_PA_MAX, true);
+  r.setDataRate(RF24_2MBPS);
+  r.setCRCLength(RF24_CRC_DISABLED);
+}
+
+bool reinitRadios() {
+  if (!radio.begin(sp)) {
+    Serial.println("ERROR: VSPI no inició");
+    return false;
   }
-  if (flag == 0) {
-    ch += 2;
-  } else {
-    ch -= 2;
+  if (!radio1.begin(hp)) {
+    Serial.println("ERROR: HSPI no inició");
+    return false;
   }
-  if ((ch1 > 79) && (flagv == 0)) {
-    flagv = 1;
-  } else if ((ch1 < 2) && (flagv == 1)) {
-    flagv = 0;
-  }
-  if ((ch > 79) && (flag == 0)) {
-    flag = 1;
-  } else if ((ch < 2) && (flag == 1)) {
-    flag = 0;
-  }
-  radio.setChannel(ch);
+  configureRadio(radio);
+  configureRadio(radio1);
+  return true;
+}
+
+
+// ═════════════════════════════════════════════════════════
+//  FUNCIONES DE JAMMING — VSPI  (ejecutadas en Core 0)
+// ═════════════════════════════════════════════════════════
+inline void vspi_sweep() {
+  if (flag0 == 0) { ch0 += 2; } else { ch0 -= 2; }
+  if ((ch0 > 79) && (flag0 == 0)) flag0 = 1;
+  else if ((ch0 < 2) && (flag0 == 1)) flag0 = 0;
+  radio.setChannel(ch0);
+}
+
+inline void vspi_random() {
+  for (byte j = 0; j < 15; j++) radio.setChannel(j);
+}
+
+// ═════════════════════════════════════════════════════════
+//  FUNCIONES DE JAMMING — HSPI  (ejecutadas en Core 1)
+//  Barrido complementario con paso +3 para cubrir la
+//  banda alta mientras VSPI cubre la baja.
+// ═════════════════════════════════════════════════════════
+inline void hspi_sweep() {
+  if (flag1 == 0) { ch1 += 3; } else { ch1 -= 3; }
+  if ((ch1 > 79) && (flag1 == 0)) flag1 = 1;
+  else if ((ch1 < 2) && (flag1 == 1)) flag1 = 0;
   radio1.setChannel(ch1);
 }
 
-void one() {
-  radio1.setChannel(random(80));
-  radio.setChannel(random(80));
-  delayMicroseconds(random(60));
+inline void hspi_random() {
+  for (byte j = 0; j < 15; j++) radio1.setChannel(j + 40);
 }
 
-void start_jamming() {
-  if (!jamming_enabled) {
-    radio.startConstCarrier(RF24_PA_MAX, ch);
-    radio1.startConstCarrier(RF24_PA_MAX, ch1);
-    jamming_enabled = true;
-    Serial.println("JAMMING_STARTED");
+
+// ═════════════════════════════════════════════════════════
+//  CORE 0 — TAREA EXCLUSIVA DE JAMMING
+// ═════════════════════════════════════════════════════════
+void jammingCore0(void *param) {
+  uint32_t yieldCtr = 0;
+  while (true) {
+    if (jamming_enabled) {
+      if (toggleSwitch.getState() == HIGH) vspi_sweep();
+      else                                 vspi_random();
+
+      if (++yieldCtr >= 5000) {
+        yieldCtr = 0;
+        vTaskDelay(1);  // 1 tick ≈ 1ms → el Idle Task corre y alimenta el WDT
+      }
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
   }
+}
+
+
+// ═════════════════════════════════════════════════════════
+//  START / STOP
+// ═════════════════════════════════════════════════════════
+void start_jamming() {
+  if (jamming_enabled) return;
+
+  // reinit completo antes de cada inicio
+  if (!reinitRadios()) return;
+
+  // reset canales
+  ch0 = 45; flag0 = 0;
+  ch1 = 60; flag1 = 0;
+
+  // startConstCarrier() UNA sola vez por radio.
+  radio.startConstCarrier(RF24_PA_MAX, ch0);
+  radio1.startConstCarrier(RF24_PA_MAX, ch1);
+
+  jamming_enabled = true;   // Core 0 arranca en su próxima iteración
+  Serial.println("JAMMING_STARTED");
 }
 
 void stop_jamming() {
-  if (jamming_enabled) {
-    radio.stopConstCarrier();
-    radio1.stopConstCarrier();
-    jamming_enabled = false;
-    has_duration = false;
-    Serial.println("STOPPED");
-  }
+  if (!jamming_enabled) return;
+
+  jamming_enabled = false;
+  // Dar tiempo a Core 0 para salir de su iteración actual.
+  // La iteración más larga (vspi_random) toma ~150 µs.
+  // 20 ms es más que suficiente.
+  delay(20);
+
+  radio.stopConstCarrier();   // CE=LOW + powerDown + limpia CONT_WAVE/PLL_LOCK
+  radio1.stopConstCarrier();
+  has_duration = false;
+  Serial.println("STOPPED");
 }
 
+// ═════════════════════════════════════════════════════════
+//  PROCESADO DE COMANDOS SERIE
+// ═════════════════════════════════════════════════════════
 void process_serial_command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
 
   if (cmd.startsWith("SWEEP_JAM")) {
-    int firstSpace = cmd.indexOf(' ');
-    int secondSpace = cmd.indexOf(' ', firstSpace + 1);
-    if (secondSpace != -1) {
-      String dur_str = cmd.substring(secondSpace + 1);
-      unsigned long duration_sec = dur_str.toInt();
-
+    int sp1 = cmd.indexOf(' ');
+    int sp2 = cmd.indexOf(' ', sp1 + 1);
+    if (sp2 != -1) {
+      unsigned long secs = cmd.substring(sp2 + 1).toInt();
       if (jamming_enabled) stop_jamming();
-
-      flag = 0;
-      flagv = 0;
-      ch = 45;
-      ch1 = 45;
-      radio.setChannel(ch);
-      radio1.setChannel(ch1);
-
-      if (duration_sec > 0) {
-        stop_time = millis() + duration_sec * 1000;
+      if (secs > 0) {
+        stop_time    = millis() + secs * 1000UL;
         has_duration = true;
       } else {
         has_duration = false;
       }
-
       start_jamming();
+    } else {
+      Serial.println("ERROR: uso -> SWEEP_JAM <modo> <segundos>");
     }
   }
   else if (cmd.startsWith("STOP")) {
@@ -221,9 +235,9 @@ void process_serial_command(String cmd) {
       Serial.print("JAMMING_ACTIVE MODE=");
       Serial.print(toggleSwitch.getState() == HIGH ? "SWEEP" : "RANDOM");
       if (has_duration) {
-        unsigned long remaining = (stop_time > millis()) ? (stop_time - millis()) / 1000 : 0;
-        Serial.print(" REMAINING=");
-        Serial.print(remaining);
+        unsigned long rem = (stop_time > millis())
+                            ? (stop_time - millis()) / 1000UL : 0;
+        Serial.print(" REMAINING="); Serial.print(rem);
       }
       Serial.println();
     } else {
@@ -236,11 +250,42 @@ void process_serial_command(String cmd) {
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  INICIALIZACIÓN
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════
+//  INIT SPI
+// ═════════════════════════════════════════════════════════
+void initVSPI() {
+  sp = new SPIClass(VSPI);
+  sp->begin();
+  if (radio.begin(sp)) {
+    delay(1000);
+    Serial.println("VSPI Started !!!");
+    configureRadio(radio);
+    radio.printPrettyDetails();
+  } else {
+    Serial.println("VSPI couldn't start !!!");
+  }
+}
+
+void initHSPI() {
+  hp = new SPIClass(HSPI);
+  hp->begin();
+  if (radio1.begin(hp)) {
+    delay(1000);
+    Serial.println("HSPI Started !!!");
+    configureRadio(radio1);
+    radio1.printPrettyDetails();
+  } else {
+    Serial.println("HSPI couldn't start !!!");
+  }
+}
+
+
+// ═════════════════════════════════════════════════════════
+//  SETUP
+// ═════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
+  pinMode(33, INPUT_PULLUP);
   esp_bt_controller_deinit();
   esp_wifi_stop();
   esp_wifi_deinit();
@@ -248,63 +293,42 @@ void setup() {
 
   toggleSwitch.setDebounceTime(50);
 
-  // Inicializar OLED
   Wire.begin(SDA_PIN, SCL_PIN);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("ERROR: Fallo al iniciar OLED");
-    // El firmware continúa funcionando aunque la pantalla falle
   } else {
     display.clearDisplay();
     display.display();
-    updateOLED();   // Muestra estado inicial (Detenido)
+    updateOLED();
   }
 
-  initHP();
-  initSP();
+  initVSPI();
+  initHSPI();
 
+  // Crear tarea de jamming en Core 0 con prioridad alta
+  xTaskCreatePinnedToCore(
+    jammingCore0,         // función
+    "jam_core0",          // nombre
+    2048,                 // stack
+    NULL,                 // parámetro
+    configMAX_PRIORITIES - 1,  // prioridad máxima
+    &jammingTaskHandle,   // handle
+    0                     // Core 0
+  );
   Serial.println("Gadget listo. Esperando comando SWEEP_JAM...");
 }
 
-void initSP() {
-  sp = new SPIClass(VSPI);
-  sp->begin();
-  if (radio1.begin(sp)) {
-    Serial.println("SP Started !!!");
-    radio1.setAutoAck(false);
-    radio1.stopListening();
-    radio1.setRetries(0, 0);
-    radio1.setPALevel(RF24_PA_MAX, true);
-    radio1.setDataRate(RF24_2MBPS);
-    radio1.setCRCLength(RF24_CRC_DISABLED);
-    radio1.printPrettyDetails();
-  } else {
-    Serial.println("SP couldn't start !!!");
-  }
-}
 
-void initHP() {
-  hp = new SPIClass(HSPI);
-  hp->begin();
-  if (radio.begin(hp)) {
-    Serial.println("HP Started !!!");
-    radio.setAutoAck(false);
-    radio.stopListening();
-    radio.setRetries(0, 0);
-    radio.setPALevel(RF24_PA_MAX, true);
-    radio.setDataRate(RF24_2MBPS);
-    radio.setCRCLength(RF24_CRC_DISABLED);
-    radio.printPrettyDetails();
-  } else {
-    Serial.println("HP couldn't start !!!");
-  }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  BUCLE PRINCIPAL — lógica original intacta + refresco de OLED no bloqueante
-// ─────────────────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════
+//  LOOP — Core 1
+//  Serial + HSPI jamming + OLED
+//  No interfiere en absoluto con el jamming de Core 0.
+// ═════════════════════════════════════════════════════════
 void loop() {
-  // 1. Leer comandos serie (original)
+  // 1. Toggle switch (solo Core 1 llama loop())
+  toggleSwitch.loop();
+
+  // 2. Comandos serie
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n') {
@@ -315,23 +339,18 @@ void loop() {
     }
   }
 
-  // 2. Control de tiempo — apagado automático (original)
+  // 3. Auto-stop por duración
   if (jamming_enabled && has_duration && millis() >= stop_time) {
     stop_jamming();
   }
 
-  // 3. Actualizar canales según botón (original)
+  // 4. HSPI — cobertura complementaria (Core 1)
   if (jamming_enabled) {
-    toggleSwitch.loop();
-    int state = toggleSwitch.getState();
-    if (state == HIGH) {
-      two();   // barrido
-    } else {
-      one();   // aleatorio
-    }
+    if (toggleSwitch.getState() == HIGH) hspi_sweep();
+    else                                 hspi_random();
   }
 
-  // 4. Refresco de OLED — no bloqueante, cada 200 ms
+  // 5. OLED cada 200 ms
   if (millis() - oled_last_update > 200) {
     oled_last_update = millis();
     updateOLED();
