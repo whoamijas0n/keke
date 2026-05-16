@@ -1880,9 +1880,11 @@ WantedBy=sysinit.target
             ("Activar Perfil: ANTENA WIFI", lambda: self._cambiar_modo_usb("host")),
             ("Activar Perfil: RUBBER DUCKY", lambda: self._cambiar_modo_usb("gadget")),
             ("Conectar a Red WiFi", self._utils_wifi_seleccionar_interfaz),
+            ("Redes WiFi Guardadas", self._utils_wifi_redes_guardadas), # NUEVA OPCIÓN
             ("Estado de Red WiFi", self._utils_wifi_estado),
             ("Conectar Dispositivo BT", self._utils_bluetooth_seleccionar_interfaz),
-            ("Estado de Adaptador BT", self._utils_bluetooth_estado)
+            ("Estado de Adaptador BT", self._utils_bluetooth_estado),
+            ("Actualizar Sistema (APT)", self._utils_actualizar_sistema) # NUEVA OPCIÓN
         ]
         for texto, cmd in opciones:
             scroll_utils.add_button(text=texto, command=cmd, style='Red.TButton', width=28)
@@ -1902,16 +1904,57 @@ WantedBy=sysinit.target
 
         sys_opts = ttk.Frame(scroll_utils.scrollable_frame, style='Dark.TFrame')
         sys_opts.pack(fill='x', padx=5, pady=5)
-        sys_opts.grid_columnconfigure((0, 1), weight=1)
+        # Modificado para soportar 3 columnas (0, 1, 2)
+        sys_opts.grid_columnconfigure((0, 1, 2), weight=1)
+        
         ttk.Button(sys_opts, text="REINICIAR", style='Danger.TButton',
-                   command=lambda: subprocess.run("reboot", shell=True)).grid(row=0, column=0, padx=2,
-                                                                              sticky="ew")
+                   command=lambda: subprocess.run("reboot", shell=True)).grid(row=0, column=0, padx=2, sticky="ew")
         ttk.Button(sys_opts, text="APAGAR", style='Danger.TButton',
-                   command=lambda: subprocess.run("shutdown -h now", shell=True)).grid(row=0, column=1, padx=2,
-                                                                                        sticky="ew")
+                   command=lambda: subprocess.run("shutdown -h now", shell=True)).grid(row=0, column=1, padx=2, sticky="ew")
+        # NUEVO BOTÓN PARA SALIR DE LA INTERFAZ
+        ttk.Button(sys_opts, text="SALIR", style='Danger.TButton',
+                   command=self.destroy).grid(row=0, column=2, padx=2, sticky="ew")
                                                                                         
         self.mostrar_consola(parent=scroll_utils.scrollable_frame)
         gc.collect()
+    # -------------------- NUEVAS FUNCIONES DE SISTEMA Y RED --------------------
+
+    def _utils_wifi_redes_guardadas(self):
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_utils_menu)
+        ttk.Label(self.main_frame, text="REDES GUARDADAS", style='Title.TLabel').pack(pady=2)
+
+        scroll = ScrollableFrame(self.main_frame, max_items=50)
+        scroll.pack(fill='both', expand=True, padx=2, pady=2)
+
+        try:
+            # Filtramos solo las conexiones WiFi guardadas en NetworkManager
+            output = subprocess.check_output("nmcli -t -f NAME,TYPE connection show | grep 802-11-wireless", shell=True, text=True)
+            redes = [line.split(':')[0] for line in output.splitlines() if line]
+
+            if not redes:
+                ttk.Label(scroll.scrollable_frame, text="No hay redes guardadas.", style='Dark.TLabel').pack(pady=10)
+            else:
+                for red in redes:
+                    scroll.add_button(text=red, command=lambda r=red: self._utils_wifi_conectar_guardada(r),
+                                      style='Gray.TButton', width=28)
+        except Exception as e:
+            ttk.Label(scroll.scrollable_frame, text=f"Error leyendo redes.", style='Dark.TLabel').pack()
+
+        self.mostrar_consola(parent=scroll.scrollable_frame)
+        gc.collect()
+
+    def _utils_wifi_conectar_guardada(self, ssid):
+        self.escribir_consola(f"[*] Conectando a red guardada: {ssid}...")
+        # Usamos nmcli connection up en lugar de device wifi connect porque ya tiene la contraseña guardada
+        self.ejecutar_comando(f"nmcli connection up '{ssid}'", use_shell=True)
+
+    def _utils_actualizar_sistema(self):
+        self.escribir_consola("[*] Iniciando actualización de repositorios...")
+        self.escribir_consola("[!] Esto puede tardar varios minutos en la Pi Zero 2.")
+        # Encadenamos update y upgrade. La bandera -y evita que apt pregunte [Y/n] y se quede trabado
+        comando_update = "sudo apt update && sudo DEBIAN_FRONTEND=noninteractive apt upgrade -y"
+        self.ejecutar_comando(comando_update, callback_after=lambda: self.escribir_consola("[+] Actualización completada."), use_shell=True)
 
     # -------------------- UTILIDADES WiFi --------------------
     def obtener_interfaces_wifi(self):
