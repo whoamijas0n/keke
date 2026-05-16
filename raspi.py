@@ -1676,61 +1676,100 @@ if __name__ == "__main__":
     # ==========================================
     # MENÚ BLUETOOTH BLE
     # ==========================================
-    def _init_gadget(self):
-        if self._gadget_initialized:
-            return
-        self._gadget_initialized = True
+
+    def _ensure_gadget(self):
+        """Verifica o restablece la conexión. Devuelve True si está listo."""
+        if self.gadget is not None and self.gadget.is_available():
+            return True
         try:
             from gadget_handler import BLEGadget
             self.gadget = BLEGadget()
-            if self.gadget.is_available():
-                self.gadget_available = True
-                self.escribir_consola("[+] Gadget NRF24 Jammer conectado.")
-            else:
-                self.gadget_available = False
-                self.escribir_consola("[!] Gadget NRF24 Jammer no detectado.")
+            self.gadget_available = self.gadget.is_available()
+            if self.gadget_available:
+                self.escribir_consola("[+] Gadget NRF24 conectado y listo.")
         except Exception as e:
             self.gadget = None
             self.gadget_available = False
-            self.escribir_consola(f"[!] Error al inicializar gadget BLE: {e}")
+            self.escribir_consola(f"[!] Error inicializando gadget: {e}")
+        return self.gadget_available
 
     def show_nrf_jammer_menu(self):
         self.limpiar_main_frame()
         self.agregar_boton_atras(self.show_inicio_menu)
         ttk.Label(self.main_frame, text="NRF24 JAMMER", style='Title.TLabel').pack(pady=2)
-        self._init_gadget()
         
+        # Indicador de carga inicial
+        loading_lbl = ttk.Label(self.main_frame, text="Detectando puerto USB...", style='Gray.TLabel')
+        loading_lbl.pack(pady=20)
+
+        # Verificación asíncrona: evita que la UI se congele durante el handshake
+        def async_check():
+            connected = self._ensure_gadget()
+            self.after(0, lambda: self._build_nrf_interface(connected, loading_lbl))
+
+        threading.Thread(target=async_check, daemon=True).start()
+
+    def _build_nrf_interface(self, connected, loading_lbl=None):
+        # FIX CRÍTICO: Verificar si loading_lbl existe y es válido antes de destruirlo
+        if loading_lbl is not None and loading_lbl.winfo_exists():
+            loading_lbl.destroy()
+
+        self.limpiar_main_frame()
+        self.agregar_boton_atras(self.show_inicio_menu)
+        ttk.Label(self.main_frame, text="NRF24 JAMMER", style='Title.TLabel').pack(pady=2)
+
         scroll_nrf = ScrollableFrame(self.main_frame, max_items=10)
         scroll_nrf.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        gadget_status = "Conectado" if self.gadget_available else "Desconectado"
-        status_color = "#00ff00" if self.gadget_available else "#ff4d4d"
-        ttk.Label(scroll_nrf.scrollable_frame, text=f"Hardware: {gadget_status}",
-                  foreground=status_color, font=('Helvetica', 9)).pack(pady=(2, 10))
-        if self.gadget_available:
+
+        status_txt = "Conectado" if connected else "Desconectado"
+        status_clr = "#00ff00" if connected else "#ff4d4d"
+        ttk.Label(scroll_nrf.scrollable_frame, text=f"Estado: {status_txt}",
+                  foreground=status_clr, font=('Helvetica', 10, 'bold')).pack(pady=(2, 10))
+
+        if connected:
             scroll_nrf.add_button(text="Activar Jamming", command=self._nrf_start, style='Red.TButton', width=28)
             scroll_nrf.add_button(text="Detener Jamming", command=self._nrf_stop, style='Danger.TButton', width=28)
             scroll_nrf.add_button(text="Consultar Estado", command=self._nrf_status, style='Gray.TButton', width=28)
+            scroll_nrf.add_button(text="Reconectar", command=self._async_reconnect, style='Gray.TButton', width=28)
         else:
             ttk.Label(scroll_nrf.scrollable_frame, text="Conecta el ESP32 por USB.", style='Dark.TLabel').pack(pady=5)
-            scroll_nrf.add_button(text="Reintentar Conexión", command=self.show_nrf_jammer_menu, style='Gray.TButton', width=28)
+            scroll_nrf.add_button(text="Buscar/Reconectar", command=self._async_reconnect, style='Gray.TButton', width=28)
+
         self.mostrar_consola(parent=scroll_nrf.scrollable_frame)
         gc.collect()
 
+    def _async_reconnect(self):
+        """Maneja la reconexión en segundo plano para evitar congelar la pantalla táctil."""
+        self.escribir_consola("[*] Intentando reconectar gadget...")
+        def do_reconnect():
+            connected = self._ensure_gadget()
+            # Vuelve al hilo principal para reconstruir la UI
+            self.after(0, lambda: self._build_nrf_interface(connected, None))
+        threading.Thread(target=do_reconnect, daemon=True).start()
+
     def _nrf_start(self):
-        if self.gadget_available:
-            self.escribir_consola("[*] Iniciando ataque RF (Barrido continuo)...")
-            self.gadget.sweep_jam(0, 0) # 0 duración = infinito hasta recibir stop
+        if self.gadget and self.gadget.is_available():
+            self.escribir_consola("[*] Iniciando barrido RF continuo...")
+            # Ejecutar en hilo para no bloquear UI esperando ACK
+            threading.Thread(target=lambda: self.gadget.sweep_jam(0, 0), daemon=True).start()
+        else:
+            self.escribir_consola("[!] Gadget desconectado. Usa 'Reconectar'.")
 
     def _nrf_stop(self):
-        if self.gadget_available:
+        if self.gadget and self.gadget.is_available():
             self.escribir_consola("[*] Deteniendo transmisiones...")
-            self.gadget.stop(0)
+            threading.Thread(target=lambda: self.gadget.stop(0), daemon=True).start()
+        else:
+            self.escribir_consola("[!] Gadget desconectado.")
 
     def _nrf_status(self):
-        if self.gadget_available:
-            self.escribir_consola(f"[+] Estado: {self.gadget.status()}")
-
+        if self.gadget and self.gadget.is_available():
+            def _fetch():
+                st = self.gadget.status()
+                self.after(0, lambda: self.escribir_consola(f"[+] Estado ESP32: {st}"))
+            threading.Thread(target=_fetch, daemon=True).start()
+        else:
+            self.escribir_consola("[!] Gadget desconectado.")
     # ==========================================
     # MENÚ RUBBER DUCKY 
     # ==========================================
