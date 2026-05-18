@@ -43,13 +43,6 @@ DragonFly es una suite de auditoría y pentesting modular diseñada para operaci
 
 La arquitectura del sistema separa claramente la lógica de ataque de la capa de presentación, permitiendo despliegues escalables desde una Raspberry Pi Zero con pantalla táctil hasta un entorno de escritorio completo con Kali Linux.
 
----
-
-## Advertencia Legal:
-
-DragonFly ha sido desarrollado exclusivamente con fines educativos y para la realización de auditorías de seguridad autorizadas por escrito. El uso de esta herramienta contra sistemas o redes sin el consentimiento explícito del propietario constituye una violación de las leyes de ciberseguridad en la mayoría de jurisdicciones. Los desarrolladores no asumen responsabilidad por el mal uso de este software. La ética profesional y el cumplimiento normativo son responsabilidad exclusiva del operador.
-
----
 
 <div align="center">
   
@@ -499,6 +492,18 @@ DragonFly/
 Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el archivo `LICENSE` en la raíz del repositorio para más información.
 
 ---
+
+<div align="center">
+
+## Advertencia Legal:
+
+
+</div>
+
+DragonFly ha sido desarrollado exclusivamente con fines educativos y para la realización de auditorías de seguridad autorizadas por escrito. El uso de esta herramienta contra sistemas o redes sin el consentimiento explícito del propietario constituye una violación de las leyes de ciberseguridad en la mayoría de jurisdicciones. Los desarrolladores no asumen responsabilidad por el mal uso de este software. La ética profesional y el cumplimiento normativo son responsabilidad exclusiva del operador.
+
+---
+
 <div align="center">
 <h2>GET FREEDOM</h2>
 </div>
