@@ -429,5 +429,5 @@ Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el a
 
 ---
 <div align="center">
-<h1>GET FREEDOM</h1>
+<h2>GET FREEDOM</h2>
 </div>
