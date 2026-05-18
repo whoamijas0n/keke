@@ -344,7 +344,13 @@ No se configura autostart ni USB Gadget, ya que los portátiles estándar no dis
 
 ---
 
+<div align="center">
+
+
 ## Gadgets de Hardware — Firmware
+
+
+</div>
 
 La carpeta `gadgets/` contiene el firmware para extender las capacidades físicas del sistema más allá de lo que ofrece el software puro. Estos módulos de hardware se comunican con la aplicación principal a través del puerto serie USB y son gestionados por `gadget_handler.py`.
 
@@ -375,6 +381,10 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 
 
 ### HSPI
+
+<div align="center">
+
+
 | 1st nRF24L01 module Pin | HSPI Pin (ESP32) | 10uf capacitor |
 |---------------|------------------|--------------------|
 | VCC           | 3.3V             | (+) capacitor |
@@ -387,7 +397,13 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 | IRQ           |                  |
 
 
+</div>
+
 ### VSPI 
+
+<div align="center">
+
+
 | 2nd nRF24L01 module Pin | VSPI Pin (ESP32) | 10uf capacitor |
 |---------------|------------------|--------------------|
 | VCC           | 3.3V             | (+) capacitor |
@@ -399,15 +415,24 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 | MISO          | GPIO 19          |
 | IRQ           |                  |
 
+
+</div>
+
 > Se recomienda colocar un condensador electrolítico de 100 µF entre VCC y GND en cada módulo nRF24L01 para estabilizar la alimentación durante los picos de transmisión a máxima potencia. La ausencia de este condensador puede causar reinicios inesperados del ESP32 o comportamiento errático de los módulos de radio.
 
 ### OLED Display I2C 
+
+<div align="center">
+
+
 | 0.96" OLED Display I2C | ESP32 |
 |------------------------|-------|
 |          GND           |  GND  |
 |          VCC           | 3.3V  |
 |          SCL           |GPIO 5 |
 |          SDA           |GPIO 4 |
+
+</div>
 
 ---
 
@@ -432,7 +457,12 @@ DragonFly/
 
 ---
 
+<div align="center">
+
+
 ## Top de contribuidores
+
+</div>
 
 <div align="center">
 
@@ -444,7 +474,11 @@ DragonFly/
 
 ---
 
+<div align="center">
+
 ## Licencia
+
+</div>
 
 Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el archivo `LICENSE` en la raíz del repositorio para más información.
 
