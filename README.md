@@ -346,11 +346,6 @@ Blue-Fly es un gadget de interferencia y análisis de radiofrecuencia en la band
 El módulo `gadget_handler.py` gestiona la conexión serie con reconexión automática y hot-plugging. Al iniciar, espera la cadena `Gadget listo` que el firmware emite en `setup()`. Si el dispositivo se desconecta físicamente durante la sesión, el gestor detecta la ausencia del archivo de dispositivo en `/dev/` y limpia el estado de forma segura, permitiendo una reconexión posterior sin reiniciar la aplicación.
 
 
-<div align="center">
-
-<img src="images/blue-fly.png" alt="logo" width="600" height="auto" />
-
-</div>
 
 ---
 
