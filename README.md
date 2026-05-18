@@ -78,11 +78,15 @@ El entorno de ejecución recomendado es el siguiente:
 > - Batería PiSugar 3: [https://a.co/d/0bZ2SinO](https://a.co/d/0bZ2SinO)
 > - Pantalla Táctil 2.4": [https://es.aliexpress.com/i/1005005770033042.html?gatewayAdapt=glo2esp](https://es.aliexpress.com/i/1005005770033042.html?gatewayAdapt=glo2esp)
 
+---
+
+
 <div align="center">
 
 <img src="images/raspi-zero.png" alt="raspi-zero" width="800" height="auto" />
 
 </div>
+
 ---
 
 ### Desglose de Herramientas
