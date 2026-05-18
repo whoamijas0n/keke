@@ -65,12 +65,19 @@ Esta variante está optimizada para ejecución en hardware de recursos limitados
 
 El entorno de ejecución recomendado es el siguiente:
 
+<div align="center">
+
+
+
 | Componente | Especificación |
 |---|---|
 | Placa | Raspberry Pi Zero 2 WH |
 | Alimentación | Batería PiSugar 3 (o compatible) |
 | Pantalla | Pantalla táctil resistiva/capacitiva de 2.4" (320x240) |
 | Sistema Operativo | Raspberry Pi OS 32-bits con entorno gráfico (Legacy o Bookworm Desktop) |
+
+
+</div>
 
 > Los siguientes enlaces son referencias de ejemplo para orientar la compra del hardware. Los precios y la disponibilidad pueden variar.
 >
@@ -85,6 +92,9 @@ El entorno de ejecución recomendado es el siguiente:
 #### 1. Reconocimiento (Nmap)
 
 Módulo de escaneo de red basado en `nmap`. El operador introduce una IP objetivo mediante un teclado numérico táctil emergente y opcionalmente activa un modo de rango CIDR (`/8`, `/16`, `/24`, `/32`). Los comandos disponibles cubren los flujos de reconocimiento más comunes en un pentest:
+
+<div align="center">
+
 
 | Opción | Descripción |
 |---|---|
@@ -101,6 +111,9 @@ Módulo de escaneo de red basado en `nmap`. El operador introduce una IP objetiv
 | SSL/TLS | Auditoría de cifrados y certificados |
 | Traceroute | Mapeo de ruta hasta el objetivo |
 | Automatizado | Pipeline completo: descubrimiento, puertos y servicios en secuencia |
+
+
+</div>
 
 Cada escaneo crea automáticamente una carpeta de sesión con la marca temporal dentro de `Resultados_Nmap/Auditoria-YYYY-MM-DD-HH-MM-SS/` y guarda la salida en archivos `.txt` numerados. El botón "Ver Resultados" permite navegar y leer estos archivos directamente desde la interfaz táctil.
 
@@ -148,11 +161,15 @@ Conjunto de herramientas de soporte operacional:
 
 El script crea y mantiene tres directorios raíz en la misma ubicación desde donde se ejecuta:
 
+<div align="center">
+
 | Directorio | Contenido |
 |---|---|
 | `Resultados_Nmap/` | Carpetas de sesión con archivos `.txt` de salida de Nmap |
 | `Resultados_Handshake/` | Capturas `.cap` de handshakes WPA/WPA2 |
 | `Resultados_EvilTwin/` | Archivos `credentials.log` con datos capturados por el portal |
+
+</div>
 
 Cada sesión genera su propia subcarpeta con nombre `Auditoria-{YYYY-MM-DD-HH-MM-SS}`, garantizando que múltiples ejecuciones no sobreescriban datos anteriores.
 
@@ -198,6 +215,8 @@ Los scripts de inyección se almacenan como archivos `.txt` dentro de la carpeta
 
 #### Sintaxis básica soportada
 
+<div align="center">
+
 | Comando | Argumento | Descripción |
 |---|---|---|
 | `STRING` | texto | Escribe la cadena carácter por carácter |
@@ -214,6 +233,8 @@ Los scripts de inyección se almacenan como archivos `.txt` dentro de la carpeta
 | `BACKSPACE` | — | Retroceso |
 | `DELETE` | — | Suprimir |
 | `REM` | comentario | Línea ignorada (comentario) |
+
+</div>
 
 Los caracteres en mayúscula son tratados automáticamente como `Shift + minúscula`. Los caracteres especiales que requieren Shift en distribución US (`:`  `?`  `_`  `+`  `"`  `>`  `<`  `|`  `{`  `}` `~`) están mapeados correctamente. Las combinaciones de dos teclas se escriben en la misma línea separadas por espacio (`GUI r`, `CTRL ALT t`).
 
@@ -256,6 +277,8 @@ La edición de escritorio está adaptada para laptops o placas Raspberry Pi más
 
 ### Diferencias respecto a la edición Raspberry Pi
 
+<div align="center">
+
 | Característica | Edición Raspi | Edición Desktop |
 |---|---|---|
 | Framework GUI | `tkinter` nativo | `customtkinter` |
@@ -265,6 +288,8 @@ La edición de escritorio está adaptada para laptops o placas Raspberry Pi más
 | Teclados táctiles emergentes | Sí (numérico y alfanumérico) | No (se usa el teclado físico) |
 | Rubber Ducky | Requiere USB Gadget HID activo | Requiere adaptador USB HID externo compatible |
 | Integración BLE Gadget | Via USB serie | Via USB serie (mismo módulo `gadget_handler.py`) |
+
+</div>
 
 Las funcionalidades de Reconocimiento Nmap, MAC Changer, Auditoría WiFi, Evil Twin, Rubber Ducky y Gadget BLE operan de forma idéntica en cuanto a lógica y comandos subyacentes. La diferencia está en la interacción: en la edición desktop el operador usa la navegación estándar de ventanas, atajos de teclado y el ratón, sin los teclados emergentes táctiles ni la lógica de scroll por gestos.
 
@@ -291,6 +316,8 @@ El script requiere privilegios de root. Si se ejecuta con `sudo`, detecta autom�
 
 ### Opciones del menú de instalación
 
+<div align="center">
+
 | Opción | Descripción |
 |---|---|
 | 1) Instalación Completa | Ejecuta las tres fases en secuencia (Todo-en-Uno) |
@@ -298,6 +325,8 @@ El script requiere privilegios de root. Si se ejecuta con `sudo`, detecta autom�
 | 3) Solo USB Gadget | Configura el script HID en `/usr/local/bin/usb_gadget.sh` |
 | 4) Solo Auto-Inicio | Crea la entrada `.desktop` de autostart y regla sudoers |
 | 5) Salir | Termina sin realizar cambios |
+
+</div>
 
 ---
 
@@ -379,11 +408,10 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 
 ### Pinout Físico — Blue-Fly
 
-
-### HSPI
-
 <div align="center">
 
+
+### HSPI
 
 | 1st nRF24L01 module Pin | HSPI Pin (ESP32) | 10uf capacitor |
 |---------------|------------------|--------------------|
@@ -397,11 +425,9 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 | IRQ           |                  |
 
 
-</div>
 
 ### VSPI 
 
-<div align="center">
 
 
 | 2nd nRF24L01 module Pin | VSPI Pin (ESP32) | 10uf capacitor |
@@ -416,13 +442,11 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 | IRQ           |                  |
 
 
-</div>
 
 > Se recomienda colocar un condensador electrolítico de 100 µF entre VCC y GND en cada módulo nRF24L01 para estabilizar la alimentación durante los picos de transmisión a máxima potencia. La ausencia de este condensador puede causar reinicios inesperados del ESP32 o comportamiento errático de los módulos de radio.
 
 ### OLED Display I2C 
 
-<div align="center">
 
 
 | 0.96" OLED Display I2C | ESP32 |
@@ -436,7 +460,11 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 
 ---
 
+<div align="center">
+
 ## Estructura del Repositorio
+
+</div>
 
 ```
 DragonFly/
