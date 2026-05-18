@@ -330,16 +330,17 @@ La carpeta `gadgets/` contiene el firmware para extender las capacidades física
 
 ### Blue-Fly
 
+
+<div align="center">
+
+<img src="images/blue-fly.jpeg" alt="logo" width="600" height="auto" />
+
+</div>
+
 **Archivo de firmware:** `BlueFly_Firmware.ino`
 **Gestor de software:** `gadget_handler.py`
 
 Blue-Fly es un gadget de interferencia y análisis de radiofrecuencia en la banda de 2.4 GHz, construido sobre un ESP32 con dos módulos nRF24L01 conectados a los buses VSPI y HSPI del microcontrolador. El firmware aprovecha la arquitectura dual-core del ESP32 para maximizar la cobertura espectral: Core 0 gestiona el módulo VSPI (comenzando en el canal 45) y Core 1 gestiona el módulo HSPI (comenzando en el canal 60) de forma completamente paralela e independiente.
-
-<div align="center">
-
-<img src="images/blue-fly.jpeg" alt="logo" width="800" height="auto" />
-
-</div>
 
 #### Capacidades
 
