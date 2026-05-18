@@ -74,9 +74,9 @@ El entorno de ejecución recomendado es el siguiente:
 
 > Los siguientes enlaces son referencias de ejemplo para orientar la compra del hardware. Los precios y la disponibilidad pueden variar.
 >
-> - Raspberry Pi Zero 2 WH: [https://amzn.to/example-rpizero2](https://amzn.to/example-rpizero2)
-> - Batería PiSugar 3: [https://amzn.to/example-pisugar3](https://amzn.to/example-pisugar3)
-> - Pantalla Táctil 2.4": [https://amzn.to/example-24screen](https://amzn.to/example-24screen)
+> - Raspberry Pi Zero 2 WH: [https://a.co/d/0gV3rUaV](https://a.co/d/0gV3rUaV)
+> - Batería PiSugar 3: [https://a.co/d/0bZ2SinO](https://a.co/d/0bZ2SinO)
+> - Pantalla Táctil 2.4": [https://es.aliexpress.com/i/1005005770033042.html?gatewayAdapt=glo2esp](https://es.aliexpress.com/i/1005005770033042.html?gatewayAdapt=glo2esp)
 
 ---
 
