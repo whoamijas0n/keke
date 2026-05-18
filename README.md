@@ -72,10 +72,6 @@ El entorno de ejecución recomendado es el siguiente:
 
 ### Desglose de Herramientas
 
-#### 0. Inicio
-
-Pantalla de bienvenida con el arte ASCII del dragón y el nombre del proyecto. Sirve como punto de entrada visual antes de seleccionar cualquier módulo.
-
 #### 1. Reconocimiento (Nmap)
 
 Módulo de escaneo de red basado en `nmap`. El operador introduce una IP objetivo mediante un teclado numérico táctil emergente y opcionalmente activa un modo de rango CIDR (`/8`, `/16`, `/24`, `/32`). Los comandos disponibles cubren los flujos de reconocimiento más comunes en un pentest:
