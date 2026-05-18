@@ -348,7 +348,7 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 
 <div align="center">
 
-<img src="images/blue-fly.jpeg" alt="logo" width="600" height="auto" />
+<img src="images/blue-fly.png" alt="logo" width="600" height="auto" />
 
 </div>
 
