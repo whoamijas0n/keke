@@ -483,15 +483,6 @@ DragonFly/
 
 ---
 
-<div align="center">
-
-## Licencia
-
-</div>
-
-Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el archivo `LICENSE` en la raíz del repositorio para más información.
-
----
 
 <div align="center">
 
@@ -505,5 +496,11 @@ DragonFly ha sido desarrollado exclusivamente con fines educativos y para la rea
 ---
 
 <div align="center">
-<h2>GET FREEDOM</h2>
+
+## Licencia
+
 </div>
+
+Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el archivo `LICENSE` en la raíz del repositorio para más información.
+
+---
