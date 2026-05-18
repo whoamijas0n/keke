@@ -14,8 +14,6 @@
 [![GitHub Issues](https://img.shields.io/github/issues/whoamijas0n/DragonFly?style=for-the-badge&color=1a1a2e&labelColor=0d0d1a)](https://github.com/whoamijas0n/DragonFly/issues/new)
 [![GitHub Pull Requests](https://img.shields.io/github/issues-pr/whoamijas0n/DragonFly?style=for-the-badge&color=1a1a2e&labelColor=0d0d1a)](https://github.com/whoamijas0n/DragonFly/issues/new)
 
-<br/>
-
 
 <br/>
 
