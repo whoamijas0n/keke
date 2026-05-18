@@ -52,7 +52,9 @@ DragonFly ha sido desarrollado exclusivamente con fines educativos y para la rea
 ---
 
 <div align="center">
+  
 ## Edición Raspberry Pi (raspi.py)
+
 </div>
 
 ### Descripción Técnica
@@ -243,7 +245,9 @@ Cambiar entre ambos modos requiere modificar la configuración del kernel y reca
 ---
 
 <div align="center">
+  
 ## Edición de Escritorio — `desktop.py`
+
 </div>
 
 ### Descripción Técnica
@@ -268,7 +272,12 @@ La barra lateral presenta los módulos numerados del 0 al 6 y permanece visible 
 
 ---
 
+<div align="center">
+
+
 ## Instalación — `install.sh`
+
+</div>
 
 ### Clonar el repositorio
 
