@@ -1,4 +1,4 @@
-s
+
 <div align="center">
 
   <img src="images/logo.png" alt="logo" width="800" height="auto" />
