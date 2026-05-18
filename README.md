@@ -51,7 +51,7 @@ DragonFly ha sido desarrollado exclusivamente con fines educativos y para la rea
 
 ---
 
-<div aling="center">
+<div align="center">
 ## Edición Raspberry Pi (raspi.py)
 </div>
 
@@ -242,7 +242,7 @@ Cambiar entre ambos modos requiere modificar la configuración del kernel y reca
 
 ---
 
-<div aling="center">
+<div align="center">
 ## Edición de Escritorio — `desktop.py`
 </div>
 
