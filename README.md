@@ -2,9 +2,9 @@
 
 <img src="images/logo.png" alt="logo" width="800" height="auto" />
 
-<h1>/// DragonFly System</h1>
+<h1>DragonFly System</h1>
 
->  **Red Team Toolbox** — Auditoría Inalámbrica, HID Attack & Network Offensive
+**Red Team Toolbox** — Auditoría Inalámbrica, HID Attack & Network Offensive
 
 <br/>
 
@@ -33,6 +33,7 @@
 DragonFly es una suite de auditoría y pentesting modular diseñada para operaciones de Red Team en entornos controlados. Proporciona una interfaz unificada para ejecutar técnicas de reconocimiento, ataques inalámbricos, inyección de pulsaciones HID y manipulación de señales RF/Bluetooth, con soporte nativo para hardware portátil basado en SBC y estaciones de trabajo convencionales.
 
 La arquitectura del sistema separa claramente la lógica de ataque de la capa de presentación, permitiendo despliegues escalables desde una Raspberry Pi Zero con pantalla táctil hasta un entorno de escritorio completo con Kali Linux.
+
 ---
 
 ## Advertencia Legal:
