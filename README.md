@@ -1,4 +1,4 @@
-
+s
 <div align="center">
 
   <img src="images/logo.png" alt="logo" width="800" height="auto" />
@@ -356,20 +356,41 @@ El módulo `gadget_handler.py` gestiona la conexión serie con reconexión autom
 
 ### Pinout Físico — Blue-Fly
 
-#### VSPI — Primer módulo nRF24L01
 
+### HSPI
 | 1st nRF24L01 module Pin | HSPI Pin (ESP32) | 10uf capacitor |
-|---|---|---|
-| VCC | 3.3V | (+) capacitor |
-| GND | GND | (-) capacitor |
-| CE | GPIO 16 | |
-| CSN | GPIO 15 | |
-| SCK | GPIO 14 | |
-| MOSI | GPIO 13 | |
-| MISO | GPIO 12 | |
-| IRQ | | |
+|---------------|------------------|--------------------|
+| VCC           | 3.3V             | (+) capacitor |
+| GND           | GND              | (-) capacitor |
+| CE            | GPIO 16          |
+| CSN           | GPIO 15          |
+| SCK           | GPIO 14          |
+| MOSI          | GPIO 13          |
+| MISO          | GPIO 12          |
+| IRQ           |                  |
 
-> Se recomienda colocar un condensador electrolítico de 10 µF entre VCC y GND en cada módulo nRF24L01 para estabilizar la alimentación durante los picos de transmisión a máxima potencia. La ausencia de este condensador puede causar reinicios inesperados del ESP32 o comportamiento errático de los módulos de radio.
+
+### VSPI 
+| 2nd nRF24L01 module Pin | VSPI Pin (ESP32) | 10uf capacitor |
+|---------------|------------------|--------------------|
+| VCC           | 3.3V             | (+) capacitor |
+| GND           | GND              | (-) capacitor |
+| CE            | GPIO 22          |
+| CSN           | GPIO 21          |
+| SCK           | GPIO 18          |
+| MOSI          | GPIO 23          |
+| MISO          | GPIO 19          |
+| IRQ           |                  |
+
+> Se recomienda colocar un condensador electrolítico de 100 µF entre VCC y GND en cada módulo nRF24L01 para estabilizar la alimentación durante los picos de transmisión a máxima potencia. La ausencia de este condensador puede causar reinicios inesperados del ESP32 o comportamiento errático de los módulos de radio.
+
+### OLED Display I2C 
+| 0.96" OLED Display I2C | ESP32 |
+|------------------------|-------|
+|          GND           |  GND  |
+|          VCC           | 3.3V  |
+|          SCL           |GPIO 5 |
+|          SDA           |GPIO 4 |
 
 ---
 
@@ -403,6 +424,7 @@ DragonFly/
 </a>
 
 </div>
+
 ---
 
 ## Licencia
@@ -411,5 +433,5 @@ Este proyecto se distribuye bajo los términos de la licencia MIT. Consulta el a
 
 ---
 <div align="center">
-<p>GET FREEDOM</p>
+<h1>GET FREEDOM</h1>
 </div>
