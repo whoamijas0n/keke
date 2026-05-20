@@ -31,40 +31,80 @@ class BLEGadget:
             self._ser = None
 
     def connect(self):
-        """Intenta abrir el puerto y sincronizar con el ESP32."""
+        """Intenta abrir el puerto y sincronizar con el ESP32 (Soporte Hot-Plug)."""
         self._handle_disconnect() # Asegurar limpieza previa
         self._port = self._auto_detect_port()
         if not self._port:
             return False
 
         try:
-            # write_timeout evita que la escritura bloquee el hilo si el buffer del SO está lleno
-            self._ser = serial.Serial(self._port, self.baudrate, timeout=1, write_timeout=1)
+            # Usamos configuración desglosada para manipular DTR/RTS antes de abrir
+            self._ser = serial.Serial()
+            self._ser.port = self._port
+            self._ser.baudrate = self.baudrate
+            self._ser.timeout = 1
+            self._ser.write_timeout = 1
+            
+            # PREVENCIÓN DE BUG ESP32:
+            # Deshabilitar DTR y RTS evita que el ESP32 se reinicie físicamente
+            # al abrir el puerto en Linux. Esto permite conectarlo en cualquier momento.
+            self._ser.dtr = False
+            self._ser.rts = False
+            
+            self._ser.open()
+            
+            # Dar un breve tiempo al OS para asignar el canal real
+            time.sleep(0.3)
+            self._ser.reset_input_buffer()
+            self._ser.reset_output_buffer()
+
             start = time.time()
             ready = False
             
+            # Forzamos una solicitud de estado por si el ESP32 ya estaba encendido
+            # (No enviará "Gadget listo" de booteo si ya arrancó antes)
+            try:
+                self._ser.write(b"STATUS\n")
+                self._ser.flush()
+            except:
+                pass
+
             while time.time() - start < 3.0:
                 try:
                     line = self._ser.readline().decode(errors='ignore').strip()
-                    if "Gadget listo" in line:
+                    # Si vemos la señal de arranque o un estado válido, marcamos ready
+                    if "Gadget listo" in line or "IDLE" in line or "JAM" in line:
                         ready = True
                         break
-                except:
+                    # Alternativa: cualquier respuesta limpia y sustancial
+                    elif len(line) > 2 and "ERROR" not in line and "STATUS" not in line:
+                        ready = True
+                        break
+                except Exception:
                     break
                 time.sleep(0.05)
 
             if not ready:
-                self._ser.write(b"STATUS\n")
-                self._ser.timeout = 1
-                resp = self._ser.readline().decode(errors='ignore').strip()
-                if "ERROR" not in resp and resp:
-                    ready = True
+                # Intento final de reanimación si la lectura previa chocó
+                try:
+                    self._ser.write(b"STATUS\n")
+                    self._ser.flush()
+                    resp = self._ser.readline().decode(errors='ignore').strip()
+                    if "ERROR" not in resp and len(resp) > 2:
+                        ready = True
+                except:
+                    pass
 
-            self._ser.timeout = self.timeout
-            self._ser.reset_input_buffer()
-            self._available = ready
-            return self._available
-        except Exception:
+            if ready:
+                self._ser.timeout = self.timeout
+                self._ser.reset_input_buffer()
+                self._available = True
+                return True
+            else:
+                self._handle_disconnect()
+                return False
+
+        except Exception as e:
             self._handle_disconnect()
             return False
 
