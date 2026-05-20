@@ -1677,29 +1677,26 @@ if __name__ == "__main__":
     # MENÚ BLUETOOTH BLE
     # ==========================================
     def _ensure_gadget(self, force_reconnect=False):
-        """Verifica o restablece la conexión usando reconexión forzada si es necesario."""
-        if force_reconnect and self.gadget is not None:
-            self.gadget.reconnect()
-            self.gadget_available = self.gadget.is_available()
-            return self.gadget_available
-
-        if self.gadget is not None and self.gadget.is_available():
-            return True
-            
+        """Verifica o restablece la conexión aislando la UI de los hilos."""
+        msg = None
         try:
             from gadget_handler import BLEGadget
             if self.gadget is None:
                 self.gadget = BLEGadget()
-            else:
+            elif force_reconnect or not self.gadget.is_available():
                 self.gadget.reconnect()
                 
             self.gadget_available = self.gadget.is_available()
             if self.gadget_available:
-                self.escribir_consola("[+] Gadget NRF24 conectado.")
+                msg = "[+] Gadget NRF24 conectado y listo."
         except Exception as e:
             self.gadget = None
             self.gadget_available = False
-            self.escribir_consola(f"[!] Error inicializando gadget: {e}")
+            msg = f"[!] Error inicializando gadget: {e}"
+            
+        if msg:
+            # Enviar mensaje a la consola de forma segura desde el hilo
+            self.after(0, lambda m=msg: self.escribir_consola(m))
             
         return self.gadget_available
 
@@ -1712,7 +1709,9 @@ if __name__ == "__main__":
         loading_lbl.pack(pady=20)
 
         def async_check():
-            connected = self._ensure_gadget()
+            # Forzamos reconexión limpia cada vez que entramos al menú
+            # Esto soluciona los problemas de hot-plugging.
+            connected = self._ensure_gadget(force_reconnect=True)
             self.after(0, lambda: self._build_nrf_interface(connected, loading_lbl))
 
         threading.Thread(target=async_check, daemon=True).start()
@@ -1751,7 +1750,7 @@ if __name__ == "__main__":
         def do_reconnect():
             connected = self._ensure_gadget(force_reconnect=True)
             if not connected:
-                self.escribir_consola("[!] No se detectó el hardware.")
+                self.after(0, lambda: self.escribir_consola("[!] No se detectó el hardware."))
             self.after(0, lambda: self._build_nrf_interface(connected, None))
             
         threading.Thread(target=do_reconnect, daemon=True).start()
@@ -1761,9 +1760,13 @@ if __name__ == "__main__":
             self.escribir_consola("[*] Iniciando barrido RF continuo...")
             def run():
                 try:
-                    self.gadget.sweep_jam(0, 0)
+                    success = self.gadget.sweep_jam(0, 0)
+                    if success:
+                        self.after(0, lambda: self.escribir_consola("[+] Jamming activado."))
+                    else:
+                        self.after(0, lambda: self.escribir_consola("[!] Sin confirmación del Gadget."))
                 except Exception as e:
-                    self.after(0, lambda: self.escribir_consola(f"[!] Error: {e}"))
+                    self.after(0, lambda e=e: self.escribir_consola(f"[!] Error: {e}"))
             threading.Thread(target=run, daemon=True).start()
         else:
             self.escribir_consola("[!] Gadget desconectado. Pulsa 'Buscar'.")
@@ -1774,8 +1777,9 @@ if __name__ == "__main__":
             def run():
                 try:
                     self.gadget.stop(0)
+                    self.after(0, lambda: self.escribir_consola("[+] Transmisión detenida."))
                 except Exception as e:
-                    self.after(0, lambda: self.escribir_consola(f"[!] Error: {e}"))
+                    self.after(0, lambda e=e: self.escribir_consola(f"[!] Error: {e}"))
             threading.Thread(target=run, daemon=True).start()
         else:
             self.escribir_consola("[!] Gadget desconectado.")
@@ -1785,9 +1789,9 @@ if __name__ == "__main__":
             def _fetch():
                 try:
                     st = self.gadget.status()
-                    self.after(0, lambda: self.escribir_consola(f"[+] Estado ESP32: {st}"))
+                    self.after(0, lambda s=st: self.escribir_consola(f"[+] Estado ESP32: {s}"))
                 except Exception as e:
-                    self.after(0, lambda: self.escribir_consola(f"[!] Error: {e}"))
+                    self.after(0, lambda e=e: self.escribir_consola(f"[!] Error: {e}"))
             threading.Thread(target=_fetch, daemon=True).start()
         else:
             self.escribir_consola("[!] Gadget desconectado.")
